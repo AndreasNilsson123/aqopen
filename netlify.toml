@@ -1,0 +1,11 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# No build step: index.html is the whole front end.
+# The scorecard API lives at /api/state, routed by config.path in the function.
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    cache-control = "no-cache"

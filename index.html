@@ -224,461 +224,583 @@
 <div class="status" id="status">Laddar…</div>
 
 <script>
-const HOLES = 18;
-const KEY = 'aqopen-state-v1';
-const SHARED = true;
-const PT = {ctpPerHole:5, ldPerHole:5, noTriple:5, comeback:10};
+  const HOLES = 18;
+  const PT = {ctpPerHole:5, ldPerHole:5, noTriple:5, comeback:10};
 
-const uid = () => Math.random().toString(36).slice(2,8);
+  const uid = () => Math.random().toString(36).slice(2,8);
 
-function defaultState(){
-  const pars = [4,4,3,5,4,4,3,4,5,4,3,4,5,4,4,3,4,5];
-  const names = ['Spelare 1','Spelare 2','Spelare 3','Spelare 4'];
-  return {
-    v:1,
-    event:'AqOpen Sweden',
-    players: names.map(n=>({id:uid(), name:n})),
-    rounds:{
-      bana:{label:'Bana (ute)', pars:[...pars], ctp:[3,12], ld:[]},
-      sim: {label:'Simulator',  pars:[...pars], ctp:[7,16], ld:[5,14]}
-    },
-    strokes:{bana:{}, sim:{}},   // roundId -> playerId -> [18]
-    ctpWins:{bana:{}, sim:{}},   // roundId -> hole -> [playerId]
-    ldWins:{sim:{}}              // hole -> [playerId]
-  };
-}
+  function defaultState(){
+    const pars = [4,4,3,5,4,4,3,4,5,4,3,4,5,4,4,3,4,5];
+    const names = ['Spelare 1','Spelare 2','Spelare 3','Spelare 4'];
+    return {
+      v:1,
+      event:'AqOpen Sweden',
+      players: names.map(n=>({id:uid(), name:n})),
+      rounds:{
+        bana:{label:'Bana (ute)', pars:[...pars], ctp:[3,12], ld:[]},
+        sim: {label:'Simulator',  pars:[...pars], ctp:[7,16], ld:[5,14]}
+      },
+      strokes:{bana:{}, sim:{}},   // roundId -> playerId -> [18]
+      ctpWins:{bana:{}, sim:{}},   // roundId -> hole -> [playerId]
+      ldWins:{sim:{}}              // hole -> [playerId]
+    };
+  }
 
-let S = defaultState();
-let tab = 'lb';
-let activePlayer = {bana:null, sim:null};
+  let S = defaultState();
+  let tab = 'lb';
+  let activePlayer = {bana:null, sim:null};
 
-/* ---------- storage ---------- */
-let saveTimer=null, saving=false;
-function setStatus(txt, strong){
-  document.getElementById('status').innerHTML = strong ? '<b>'+txt+'</b>' : txt;
-}
-async function load(){
-  try{
-    const r = await window.storage.get(KEY, SHARED);
-    if(r && r.value){
-      const parsed = JSON.parse(r.value);
-      S = Object.assign(defaultState(), parsed);
-      setStatus('Sparat resultat inläst · delas mellan alla som öppnar sidan');
-    }else{
-      setStatus('Nytt event · resultatet delas mellan alla som öppnar sidan');
+  /* ---------- sync ----------
+     Backend is /api/state (Netlify Function + Netlify Blobs). Everyone who
+     opens the site reads and writes the same scorecard.
+     If the API is unreachable (opened as a local file, offline on the course),
+     we fall back to localStorage so the round can still be scored, and push
+     up as soon as the connection returns.
+
+     Concurrency: the server keeps a revision number. A write with a stale
+     revision is rejected, and the client then does a three-way merge against
+     the last state it knew about, so two phones entering different holes at
+     the same time both keep their input. */
+  const API = '/api/state';
+  const LOCAL_KEY = 'aqopen-state-v1';
+  const POLL_MS = 6000;
+
+  let rev = 0;            // last revision seen from the server
+  let base = null;        // server state the local state was derived from
+  let offline = false;
+  let saveTimer = null, inFlight = false, dirty = false;
+
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
+
+  function setStatus(txt, strong){
+    document.getElementById('status').innerHTML = strong ? '<b>'+txt+'</b>' : txt;
+  }
+  function syncedNote(){
+    return offline
+            ? 'Offline · sparat på den här telefonen, skickas upp när nätet är tillbaka'
+            : 'Sparat · alla som öppnar sidan ser samma resultat';
+  }
+
+  /* Three-way merge: a value the user changed locally wins, otherwise the
+     server value wins. Fixed-length arrays (par, slag) merge per position. */
+  function merge(base, local, server){
+    if(base===undefined) base = null;
+    if(same(local, server)) return clone(local);
+    if(Array.isArray(local) && Array.isArray(server)){
+      if(Array.isArray(base) && local.length===server.length && base.length===local.length){
+        return local.map((v,i)=>merge(base[i], v, server[i]));
+      }
+      return same(local, base) ? clone(server) : clone(local);
     }
-  }catch(e){
-    setStatus('Nytt event · resultatet delas mellan alla som öppnar sidan');
+    const plain = v => v && typeof v==='object' && !Array.isArray(v);
+    if(plain(local) && plain(server)){
+      const out = {};
+      const b = plain(base) ? base : {};
+      new Set([...Object.keys(local), ...Object.keys(server)]).forEach(k=>{
+        const inL = k in local, inS = k in server, inB = k in b;
+        if(inL && inS){ out[k] = merge(b[k], local[k], server[k]); }
+        else if(inL){ if(!inB || !same(local[k], b[k])) out[k] = clone(local[k]); }   // added locally
+        else if(inS){ if(!inB) out[k] = clone(server[k]); }                            // added on server
+      });
+      return out;
+    }
+    return same(local, base) ? clone(server) : clone(local);
   }
-  render();
-}
-function save(){
-  clearTimeout(saveTimer);
-  setStatus('Sparar…');
-  saveTimer = setTimeout(async ()=>{
-    try{
-      saving=true;
-      await window.storage.set(KEY, JSON.stringify(S), SHARED);
-      setStatus('Sparat · resultatet delas mellan alla som öppnar sidan');
-    }catch(e){
-      setStatus('Kunde inte spara. Kontrollera anslutningen och ändra något för att försöka igen.');
-    }finally{ saving=false; }
-  }, 450);
-}
 
-/* ---------- scoring ---------- */
-function holePoints(strokes, par){
-  if(strokes==null) return null;
-  const d = strokes - par;
-  if(d<=-2) return 12;
-  if(d===-1) return 6;
-  if(d===0) return 3;
-  if(d===1) return 2;
-  if(d===2) return 1;
-  return 0;
-}
-function holeLabel(strokes, par){
-  if(strokes==null) return '';
-  const d = strokes - par;
-  if(d<=-2) return 'Eagle+';
-  if(d===-1) return 'Birdie';
-  if(d===0) return 'Par';
-  if(d===1) return 'Bogey';
-  if(d===2) return 'Dubbel';
-  return 'Trippel+';
-}
-function arr(roundId, pid){
-  const r = S.strokes[roundId] || (S.strokes[roundId]={});
-  if(!r[pid]) r[pid] = new Array(HOLES).fill(null);
-  if(r[pid].length!==HOLES) r[pid] = r[pid].concat(new Array(HOLES).fill(null)).slice(0,HOLES);
-  return r[pid];
-}
-function roundStable(roundId, pid){
-  const a = arr(roundId,pid), pars = S.rounds[roundId].pars;
-  let sum=0, filled=0, clean=true;
-  for(let i=0;i<HOLES;i++){
-    if(a[i]==null){ continue; }
-    filled++;
-    sum += holePoints(a[i], pars[i]);
-    if(a[i]-pars[i] >= 3) clean=false;
+  function applyServer(doc){
+    const incoming = doc.state ? Object.assign(defaultState(), doc.state) : null;
+    if(!incoming){ rev = doc.rev; base = clone(S); return false; }
+    const merged = base ? merge(base, S, incoming) : incoming;
+    const changed = !same(merged, S);
+    S = merged;
+    base = clone(incoming);
+    rev = doc.rev;
+    if(!same(S, incoming)) queueSave();   // local edits still need pushing
+    return changed;
   }
-  return {sum, filled, complete: filled===HOLES, clean};
-}
-function splitPoints(winners, total){
-  const out = {};
-  if(!winners || !winners.length) return out;
-  const each = total / winners.length;
-  winners.forEach(p => out[p] = (out[p]||0) + each);
-  return out;
-}
-function compute(){
-  const res = {};
-  S.players.forEach(p=>{
-    res[p.id] = {stableBana:0, stableSim:0, ctp:0, ld:0, tri:0, cb:0, total:0,
-                 cleanBana:false, cleanSim:false, delta:null};
-  });
-  S.players.forEach(p=>{
-    const b = roundStable('bana', p.id), s = roundStable('sim', p.id);
-    const r = res[p.id];
-    r.stableBana = b.sum; r.stableSim = s.sum;
-    if(b.complete && b.clean){ r.tri += PT.noTriple; r.cleanBana = true; }
-    if(s.complete && s.clean){ r.tri += PT.noTriple; r.cleanSim = true; }
-    if(b.complete && s.complete) r.delta = s.sum - b.sum;
-  });
-  // CTP
-  ['bana','sim'].forEach(rid=>{
-    const wins = S.ctpWins[rid]||{};
-    Object.keys(wins).forEach(h=>{
-      const add = splitPoints(wins[h], PT.ctpPerHole);
-      Object.keys(add).forEach(pid=>{ if(res[pid]) res[pid].ctp += add[pid]; });
+
+  async function pull(){
+    const r = await fetch(API, {cache:'no-store'});
+    if(!r.ok) throw new Error('GET '+r.status);
+    return r.json();                        // {rev, state}
+  }
+  async function push(){
+    const r = await fetch(API, {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({rev, state:S})
     });
-  });
-  // Longest drive (simulator)
-  const lw = S.ldWins.sim||{};
-  Object.keys(lw).forEach(h=>{
-    const add = splitPoints(lw[h], PT.ldPerHole);
-    Object.keys(add).forEach(pid=>{ if(res[pid]) res[pid].ld += add[pid]; });
-  });
-  // Comeback
-  const eligible = S.players.filter(p=>res[p.id].delta!=null && res[p.id].delta>0);
-  if(eligible.length){
-    const best = Math.max(...eligible.map(p=>res[p.id].delta));
-    const winners = eligible.filter(p=>res[p.id].delta===best).map(p=>p.id);
-    const add = splitPoints(winners, PT.comeback);
-    Object.keys(add).forEach(pid=>{ res[pid].cb += add[pid]; });
+    if(r.status===409){ return {conflict:true, doc: await r.json()}; }
+    if(!r.ok) throw new Error('PUT '+r.status);
+    return {conflict:false, doc: await r.json()}; // {rev}
   }
-  S.players.forEach(p=>{
-    const r = res[p.id];
-    r.total = r.stableBana + r.stableSim + r.ctp + r.ld + r.tri + r.cb;
-  });
-  return res;
-}
-const fmt = n => (Math.round(n*10)/10).toString().replace('.', ',');
 
-/* ---------- rendering ---------- */
-const el = (h)=>{const d=document.createElement('div'); d.innerHTML=h.trim(); return d.firstElementChild;};
-const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-function render(){
-  const v = document.getElementById('view');
-  v.innerHTML = '';
-  document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', String(t.dataset.tab===tab)));
-  if(tab==='lb') v.appendChild(renderLeaderboard());
-  else if(tab==='cfg') v.appendChild(renderConfig());
-  else v.appendChild(renderRound(tab));
-  window.scrollTo({top:0, behavior:'instant'});
-}
-
-function renderLeaderboard(){
-  const res = compute();
-  const sorted = [...S.players].sort((a,b)=>res[b.id].total-res[a.id].total);
-  const max = Math.max(1, ...S.players.map(p=>res[p.id].total));
-  const box = el('<div></div>');
-
-  const card = el('<section class="card"><div class="card-head">Totalställning<span style="font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400;opacity:.75">Flest poäng vinner</span></div><div class="card-body" id="lbb"></div></section>');
-  const body = card.querySelector('#lbb');
-
-  if(!S.players.length){
-    body.appendChild(el('<p class="empty-note">Lägg till spelare under Inställningar för att börja.</p>'));
+  async function flush(){
+    saveTimer = null;                      // cleared so polling can resume
+    if(inFlight) { dirty = true; return; }
+    inFlight = true; dirty = false;
+    localStorage.setItem(LOCAL_KEY, JSON.stringify({rev, state:S}));
+    try{
+      let res = await push();
+      if(res.conflict){
+        applyServer(res.doc);
+        res = await push();                 // one retry after merging
+        if(res.conflict){ dirty = true; }
+      }
+      if(!res.conflict){ rev = res.doc.rev; base = clone(S); }
+      offline = false;
+      setStatus(syncedNote());
+      render();
+    }catch(e){
+      offline = true;
+      setStatus(syncedNote());
+    }finally{
+      inFlight = false;
+      if(dirty) queueSave();
+    }
   }
-  sorted.forEach((p,i)=>{
-    const r = res[p.id];
-    const seg = (cls,val)=> val>0 ? '<i class="'+cls+'" style="width:'+(val/max*100)+'%"></i>' : '';
-    const row = el(
-      '<div class="lb-row'+(i===0&&r.total>0?' lead':'')+'">'+
-        '<div class="rank">'+(i+1)+'</div>'+
-        '<div class="lb-main">'+
-          '<div class="lb-top"><div class="lb-name">'+esc(p.name)+'</div>'+
-          '<div class="lb-pts">'+fmt(r.total)+'<small>p</small></div></div>'+
-          '<div class="bar">'+
-            seg('s-stable', r.stableBana+r.stableSim)+seg('s-ctp', r.ctp)+
-            seg('s-ld', r.ld)+seg('s-tri', r.tri)+seg('s-cb', r.cb)+
-          '</div>'+
-          '<div class="lb-break">'+
-            '<span>Bana <b>'+fmt(r.stableBana)+'</b></span>'+
-            '<span>Sim <b>'+fmt(r.stableSim)+'</b></span>'+
-            '<span>CTP <b>'+fmt(r.ctp)+'</b></span>'+
-            '<span>Drive <b>'+fmt(r.ld)+'</b></span>'+
-            '<span>Utan trippel <b>'+fmt(r.tri)+'</b></span>'+
-            '<span>Comeback <b>'+fmt(r.cb)+'</b></span>'+
-          '</div>'+
-        '</div>'+
-      '</div>');
-    body.appendChild(row);
-  });
-  body.appendChild(el(
-    '<div class="legend" style="margin-top:14px">'+
-    '<span><i class="swatch s-stable"></i>Stableford</span>'+
-    '<span><i class="swatch s-ctp"></i>Closest to pin</span>'+
-    '<span><i class="swatch s-ld"></i>Längsta drive</span>'+
-    '<span><i class="swatch s-tri"></i>No trippelbogey</span>'+
-    '<span><i class="swatch s-cb"></i>Comeback</span></div>'));
-  box.appendChild(card);
+  function queueSave(){
+    clearTimeout(saveTimer);
+    if(!offline) setStatus('Sparar…');
+    saveTimer = setTimeout(flush, 500);
+  }
+  const save = queueSave;
 
-  // delpriser
-  const dp = el('<section class="card"><div class="card-head light">Delpriser</div><div class="card-body" id="dp"></div></section>');
-  const d = dp.querySelector('#dp');
-  const lead = (label, pick) => {
-    const vals = S.players.map(p=>({p, v:pick(res[p.id])})).filter(x=>x.v>0);
-    const best = vals.length ? Math.max(...vals.map(x=>x.v)) : 0;
-    const who = vals.filter(x=>x.v===best).map(x=>esc(x.p.name)).join(', ');
-    return '<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--line)">'+
-      '<span style="color:var(--muted);font-size:13px">'+label+'</span>'+
-      '<span style="text-align:right;font-size:13.5px">'+(who? esc(who)+' <b style="font-family:\'IBM Plex Mono\',monospace">'+fmt(best)+'p</b>' : '<span style="color:#B7C2D0">Ej avgjort</span>')+'</span></div>';
-  };
-  d.innerHTML =
-    lead('Closest to pin', r=>r.ctp) +
-    lead('Längsta drive', r=>r.ld) +
-    lead('No trippelbogey', r=>r.tri) +
-    lead('Comeback', r=>r.cb);
-  const cbList = S.players.filter(p=>res[p.id].delta!=null)
-    .map(p=>esc(p.name)+' '+(res[p.id].delta>0?'+':'')+res[p.id].delta).join(' · ');
-  d.appendChild(el('<p class="empty-note" style="margin:12px 0 0">Comeback räknas när båda ronderna är ifyllda.'+(cbList?' Skillnad sim − bana: '+cbList:'')+'</p>'));
-  box.appendChild(dp);
+  async function poll(){
+    if(inFlight || saveTimer) return;
+    try{
+      const doc = await pull();
+      offline = false;
+      if(doc.rev !== rev){
+        const changed = applyServer(doc);
+        setStatus(syncedNote());
+        if(changed) render();
+      }
+    }catch(e){
+      if(!offline){ offline = true; setStatus(syncedNote()); }
+    }
+  }
 
-  const rules = el('<section class="card"><div class="card-head light">Poängregler</div><div class="card-body"><ul class="rules" style="margin:0;padding-left:18px">'+
-    '<li>Stableford per hål: eagle eller bättre 12, birdie 6, par 3, bogey 2, dubbelbogey 1, trippelbogey eller sämre 0.</li>'+
-    '<li>Closest to pin: 5 poäng per utvalt par 3-hål, 2 hål per rond. Delas vid lika.</li>'+
-    '<li>Längsta drive: 5 poäng per utvalt simulatorhål, slaget måste landa på fairway.</li>'+
-    '<li>No trippelbogey: 5 poäng för en rond utan trippelbogey eller sämre på alla 18 hål.</li>'+
-    '<li>Comeback: 10 poäng till störst förbättring från banrond till simulatorrond. Delas vid lika.</li>'+
-    '</ul></div></section>');
-  box.appendChild(rules);
-  return box;
-}
+  async function load(){
+    const cached = localStorage.getItem(LOCAL_KEY);
+    if(cached){
+      try{
+        const c = JSON.parse(cached);
+        S = Object.assign(defaultState(), c.state || {});
+        rev = c.rev || 0;
+        base = clone(S);
+      }catch(e){}
+    }
+    try{
+      const doc = await pull();
+      applyServer(doc);
+      if(!doc.state) queueSave();           // first ever load: seed the server
+      setStatus(syncedNote());
+    }catch(e){
+      offline = true;
+      setStatus(syncedNote());
+    }
+    render();
+    setInterval(poll, POLL_MS);
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) poll(); });
+  }
 
-function renderRound(rid){
-  const R = S.rounds[rid];
-  const box = el('<div></div>');
-  if(!S.players.length){
-    box.appendChild(el('<section class="card"><div class="card-body"><p class="empty-note">Lägg till spelare under Inställningar först.</p></div></section>'));
+  /* ---------- scoring ---------- */
+  function holePoints(strokes, par){
+    if(strokes==null) return null;
+    const d = strokes - par;
+    if(d<=-2) return 12;
+    if(d===-1) return 6;
+    if(d===0) return 3;
+    if(d===1) return 2;
+    if(d===2) return 1;
+    return 0;
+  }
+  function holeLabel(strokes, par){
+    if(strokes==null) return '';
+    const d = strokes - par;
+    if(d<=-2) return 'Eagle+';
+    if(d===-1) return 'Birdie';
+    if(d===0) return 'Par';
+    if(d===1) return 'Bogey';
+    if(d===2) return 'Dubbel';
+    return 'Trippel+';
+  }
+  function arr(roundId, pid){
+    const r = S.strokes[roundId] || (S.strokes[roundId]={});
+    if(!r[pid]) r[pid] = new Array(HOLES).fill(null);
+    if(r[pid].length!==HOLES) r[pid] = r[pid].concat(new Array(HOLES).fill(null)).slice(0,HOLES);
+    return r[pid];
+  }
+  function roundStable(roundId, pid){
+    const a = arr(roundId,pid), pars = S.rounds[roundId].pars;
+    let sum=0, filled=0, clean=true;
+    for(let i=0;i<HOLES;i++){
+      if(a[i]==null){ continue; }
+      filled++;
+      sum += holePoints(a[i], pars[i]);
+      if(a[i]-pars[i] >= 3) clean=false;
+    }
+    return {sum, filled, complete: filled===HOLES, clean};
+  }
+  function splitPoints(winners, total){
+    const out = {};
+    if(!winners || !winners.length) return out;
+    const each = total / winners.length;
+    winners.forEach(p => out[p] = (out[p]||0) + each);
+    return out;
+  }
+  function compute(){
+    const res = {};
+    S.players.forEach(p=>{
+      res[p.id] = {stableBana:0, stableSim:0, ctp:0, ld:0, tri:0, cb:0, total:0,
+        cleanBana:false, cleanSim:false, delta:null};
+    });
+    S.players.forEach(p=>{
+      const b = roundStable('bana', p.id), s = roundStable('sim', p.id);
+      const r = res[p.id];
+      r.stableBana = b.sum; r.stableSim = s.sum;
+      if(b.complete && b.clean){ r.tri += PT.noTriple; r.cleanBana = true; }
+      if(s.complete && s.clean){ r.tri += PT.noTriple; r.cleanSim = true; }
+      if(b.complete && s.complete) r.delta = s.sum - b.sum;
+    });
+    // CTP
+    ['bana','sim'].forEach(rid=>{
+      const wins = S.ctpWins[rid]||{};
+      Object.keys(wins).forEach(h=>{
+        const add = splitPoints(wins[h], PT.ctpPerHole);
+        Object.keys(add).forEach(pid=>{ if(res[pid]) res[pid].ctp += add[pid]; });
+      });
+    });
+    // Longest drive (simulator)
+    const lw = S.ldWins.sim||{};
+    Object.keys(lw).forEach(h=>{
+      const add = splitPoints(lw[h], PT.ldPerHole);
+      Object.keys(add).forEach(pid=>{ if(res[pid]) res[pid].ld += add[pid]; });
+    });
+    // Comeback
+    const eligible = S.players.filter(p=>res[p.id].delta!=null && res[p.id].delta>0);
+    if(eligible.length){
+      const best = Math.max(...eligible.map(p=>res[p.id].delta));
+      const winners = eligible.filter(p=>res[p.id].delta===best).map(p=>p.id);
+      const add = splitPoints(winners, PT.comeback);
+      Object.keys(add).forEach(pid=>{ res[pid].cb += add[pid]; });
+    }
+    S.players.forEach(p=>{
+      const r = res[p.id];
+      r.total = r.stableBana + r.stableSim + r.ctp + r.ld + r.tri + r.cb;
+    });
+    return res;
+  }
+  const fmt = n => (Math.round(n*10)/10).toString().replace('.', ',');
+
+  /* ---------- rendering ---------- */
+  /* <template> parses table fragments correctly. A plain div drops <tr>/<td>,
+     which silently returns the wrong node for scorecard rows. */
+  const el = (h)=>{const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstElementChild;};
+  const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function render(){
+    const v = document.getElementById('view');
+    v.innerHTML = '';
+    document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', String(t.dataset.tab===tab)));
+    if(tab==='lb') v.appendChild(renderLeaderboard());
+    else if(tab==='cfg') v.appendChild(renderConfig());
+    else v.appendChild(renderRound(tab));
+    window.scrollTo({top:0, behavior:'instant'});
+  }
+
+  function renderLeaderboard(){
+    const res = compute();
+    const sorted = [...S.players].sort((a,b)=>res[b.id].total-res[a.id].total);
+    const max = Math.max(1, ...S.players.map(p=>res[p.id].total));
+    const box = el('<div></div>');
+
+    const card = el('<section class="card"><div class="card-head">Totalställning<span style="font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400;opacity:.75">Flest poäng vinner</span></div><div class="card-body" id="lbb"></div></section>');
+    const body = card.querySelector('#lbb');
+
+    if(!S.players.length){
+      body.appendChild(el('<p class="empty-note">Lägg till spelare under Inställningar för att börja.</p>'));
+    }
+    sorted.forEach((p,i)=>{
+      const r = res[p.id];
+      const seg = (cls,val)=> val>0 ? '<i class="'+cls+'" style="width:'+(val/max*100)+'%"></i>' : '';
+      const row = el(
+              '<div class="lb-row'+(i===0&&r.total>0?' lead':'')+'">'+
+              '<div class="rank">'+(i+1)+'</div>'+
+              '<div class="lb-main">'+
+              '<div class="lb-top"><div class="lb-name">'+esc(p.name)+'</div>'+
+              '<div class="lb-pts">'+fmt(r.total)+'<small>p</small></div></div>'+
+              '<div class="bar">'+
+              seg('s-stable', r.stableBana+r.stableSim)+seg('s-ctp', r.ctp)+
+              seg('s-ld', r.ld)+seg('s-tri', r.tri)+seg('s-cb', r.cb)+
+              '</div>'+
+              '<div class="lb-break">'+
+              '<span>Bana <b>'+fmt(r.stableBana)+'</b></span>'+
+              '<span>Sim <b>'+fmt(r.stableSim)+'</b></span>'+
+              '<span>CTP <b>'+fmt(r.ctp)+'</b></span>'+
+              '<span>Drive <b>'+fmt(r.ld)+'</b></span>'+
+              '<span>Utan trippel <b>'+fmt(r.tri)+'</b></span>'+
+              '<span>Comeback <b>'+fmt(r.cb)+'</b></span>'+
+              '</div>'+
+              '</div>'+
+              '</div>');
+      body.appendChild(row);
+    });
+    body.appendChild(el(
+            '<div class="legend" style="margin-top:14px">'+
+            '<span><i class="swatch s-stable"></i>Stableford</span>'+
+            '<span><i class="swatch s-ctp"></i>Closest to pin</span>'+
+            '<span><i class="swatch s-ld"></i>Längsta drive</span>'+
+            '<span><i class="swatch s-tri"></i>No trippelbogey</span>'+
+            '<span><i class="swatch s-cb"></i>Comeback</span></div>'));
+    box.appendChild(card);
+
+    // delpriser
+    const dp = el('<section class="card"><div class="card-head light">Delpriser</div><div class="card-body" id="dp"></div></section>');
+    const d = dp.querySelector('#dp');
+    const lead = (label, pick) => {
+      const vals = S.players.map(p=>({p, v:pick(res[p.id])})).filter(x=>x.v>0);
+      const best = vals.length ? Math.max(...vals.map(x=>x.v)) : 0;
+      const who = vals.filter(x=>x.v===best).map(x=>esc(x.p.name)).join(', ');
+      return '<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--line)">'+
+              '<span style="color:var(--muted);font-size:13px">'+label+'</span>'+
+              '<span style="text-align:right;font-size:13.5px">'+(who? esc(who)+' <b style="font-family:\'IBM Plex Mono\',monospace">'+fmt(best)+'p</b>' : '<span style="color:#B7C2D0">Ej avgjort</span>')+'</span></div>';
+    };
+    d.innerHTML =
+            lead('Closest to pin', r=>r.ctp) +
+            lead('Längsta drive', r=>r.ld) +
+            lead('No trippelbogey', r=>r.tri) +
+            lead('Comeback', r=>r.cb);
+    const cbList = S.players.filter(p=>res[p.id].delta!=null)
+            .map(p=>esc(p.name)+' '+(res[p.id].delta>0?'+':'')+res[p.id].delta).join(' · ');
+    d.appendChild(el('<p class="empty-note" style="margin:12px 0 0">Comeback räknas när båda ronderna är ifyllda.'+(cbList?' Skillnad sim − bana: '+cbList:'')+'</p>'));
+    box.appendChild(dp);
+
+    const rules = el('<section class="card"><div class="card-head light">Poängregler</div><div class="card-body"><ul class="rules" style="margin:0;padding-left:18px">'+
+            '<li>Stableford per hål: eagle eller bättre 12, birdie 6, par 3, bogey 2, dubbelbogey 1, trippelbogey eller sämre 0.</li>'+
+            '<li>Closest to pin: 5 poäng per utvalt par 3-hål, 2 hål per rond. Delas vid lika.</li>'+
+            '<li>Längsta drive: 5 poäng per utvalt simulatorhål, slaget måste landa på fairway.</li>'+
+            '<li>No trippelbogey: 5 poäng för en rond utan trippelbogey eller sämre på alla 18 hål.</li>'+
+            '<li>Comeback: 10 poäng till störst förbättring från banrond till simulatorrond. Delas vid lika.</li>'+
+            '</ul></div></section>');
+    box.appendChild(rules);
     return box;
   }
-  if(!activePlayer[rid] || !S.players.some(p=>p.id===activePlayer[rid])) activePlayer[rid]=S.players[0].id;
-  const pid = activePlayer[rid];
 
-  // player picker
-  const pick = el('<section class="card"><div class="card-head">'+esc(R.label)+'</div><div class="card-body"><h3 class="sec">Spelare</h3><div class="chips" id="pp"></div></div></section>');
-  const pp = pick.querySelector('#pp');
-  S.players.forEach(p=>{
-    const c = el('<button class="chip" aria-pressed="'+(p.id===pid)+'">'+esc(p.name)+'</button>');
-    c.onclick = ()=>{ activePlayer[rid]=p.id; render(); };
-    pp.appendChild(c);
-  });
-  box.appendChild(pick);
+  function renderRound(rid){
+    const R = S.rounds[rid];
+    const box = el('<div></div>');
+    if(!S.players.length){
+      box.appendChild(el('<section class="card"><div class="card-body"><p class="empty-note">Lägg till spelare under Inställningar först.</p></div></section>'));
+      return box;
+    }
+    if(!activePlayer[rid] || !S.players.some(p=>p.id===activePlayer[rid])) activePlayer[rid]=S.players[0].id;
+    const pid = activePlayer[rid];
 
-  // scorecard
-  const st = roundStable(rid,pid);
-  const sc = el('<section class="card"><div class="card-head light">Scorekort<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">'+st.sum+' p</span></div><div class="card-body"><table class="holes"><thead><tr><th>Hål</th><th>Par</th><th></th><th style="text-align:right">Slag</th><th style="text-align:right">Resultat</th></tr></thead><tbody id="tb"></tbody></table></div></section>');
-  const tb = sc.querySelector('#tb');
-  const a = arr(rid,pid);
-  let strokeSum = 0;
-  for(let i=0;i<HOLES;i++){
-    const par = R.pars[i], v = a[i];
-    if(v!=null) strokeSum += v;
-    const pts = holePoints(v,par);
-    const lab = holeLabel(v,par);
-    const isTri = v!=null && (v-par)>=3;
-    const tags = (R.ctp.includes(i+1)?'<span class="tag">CTP</span>':'') + (rid==='sim'&&R.ld.includes(i+1)?'<span class="tag">LD</span>':'');
-    const tr = el('<tr'+(v!=null?' class="done"':'')+'>'+
-      '<td class="hno">'+(i+1)+'</td>'+
-      '<td class="par">Par '+par+'</td>'+
-      '<td class="tags">'+tags+'</td>'+
-      '<td><div class="stepper">'+
-        '<button aria-label="Ett slag mindre">−</button>'+
-        '<input class="strokes'+(v==null?' empty':'')+'" inputmode="numeric" value="'+(v==null?'–':v)+'">'+
-        '<button aria-label="Ett slag mer">+</button>'+
-      '</div></td>'+
-      '<td class="res'+(isTri?' tri':'')+'">'+(v==null?'<span style="color:#B7C2D0">–</span>':lab+' <b>'+pts+'</b>')+'</td>'+
-    '</tr>');
-    const [minus, plus] = tr.querySelectorAll('.stepper button');
-    const input = tr.querySelector('.strokes');
-    const setVal = (nv)=>{ a[i] = nv; save(); render(); };
-    minus.onclick = ()=> setVal(a[i]==null ? par : Math.max(1, a[i]-1));
-    plus.onclick  = ()=> setVal(a[i]==null ? par : Math.min(20, a[i]+1));
-    input.onfocus = e=>{ if(a[i]==null) e.target.value=''; e.target.select(); };
-    input.onblur = e=>{
-      const raw = e.target.value.trim();
-      if(raw===''||raw==='–'){ setVal(null); return; }
-      const n = parseInt(raw,10);
-      setVal(isNaN(n)?null:Math.min(20,Math.max(1,n)));
-    };
-    input.onkeydown = e=>{ if(e.key==='Enter') e.target.blur(); };
-    tb.appendChild(tr);
-  }
-  tb.appendChild(el('<tr class="totrow"><td colspan="3">Totalt</td><td style="text-align:right;font-family:\'IBM Plex Mono\',monospace">'+(strokeSum||'–')+'</td><td class="res"><b>'+st.sum+' p</b></td></tr>'));
-  const cleanNote = st.complete
-    ? (st.clean ? '<p class="empty-note" style="margin:10px 0 0;color:var(--blue)">Ronden klar utan trippelbogey: +5 poäng.</p>'
-                : '<p class="empty-note" style="margin:10px 0 0">Ronden klar. Trippelbogey eller sämre noterad, ingen bonus.</p>')
-    : '<p class="empty-note" style="margin:10px 0 0">'+st.filled+' av 18 hål ifyllda.</p>';
-  sc.querySelector('.card-body').appendChild(el(cleanNote));
-  box.appendChild(sc);
-
-  // CTP
-  const ctp = el('<section class="card"><div class="card-head light">Closest to pin</div><div class="card-body" id="cb"></div></section>');
-  const cb = ctp.querySelector('#cb');
-  cb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Markera den som ligger närmast hål. Flera markerade delar på '+PT.ctpPerHole+' poäng.</p>'));
-  if(!R.ctp.length) cb.appendChild(el('<p class="empty-note">Inga CTP-hål valda för den här ronden. Välj dem under Inställningar.</p>'));
-  R.ctp.forEach(h=>{
-    const wrap = el('<div class="subcard"><h4>Hål '+h+' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par '+R.pars[h-1]+'</span></h4><div class="chips" id="c'+h+'"></div></div>');
-    const row = wrap.querySelector('#c'+h);
-    const cur = (S.ctpWins[rid][h]||[]);
+    // player picker
+    const pick = el('<section class="card"><div class="card-head">'+esc(R.label)+'</div><div class="card-body"><h3 class="sec">Spelare</h3><div class="chips" id="pp"></div></div></section>');
+    const pp = pick.querySelector('#pp');
     S.players.forEach(p=>{
-      const on = cur.includes(p.id);
-      const c = el('<button class="chip blue" aria-pressed="'+on+'">'+esc(p.name)+'</button>');
-      c.onclick = ()=>{
-        const list = new Set(S.ctpWins[rid][h]||[]);
-        list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-        S.ctpWins[rid][h] = [...list];
-        if(!S.ctpWins[rid][h].length) delete S.ctpWins[rid][h];
-        save(); render();
-      };
-      row.appendChild(c);
+      const c = el('<button class="chip" aria-pressed="'+(p.id===pid)+'">'+esc(p.name)+'</button>');
+      c.onclick = ()=>{ activePlayer[rid]=p.id; render(); };
+      pp.appendChild(c);
     });
-    if(cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+fmt(PT.ctpPerHole/cur.length)+' poäng var.</p>'));
-    cb.appendChild(wrap);
-  });
-  box.appendChild(ctp);
+    box.appendChild(pick);
 
-  // Longest drive (sim only)
-  if(rid==='sim'){
-    const ld = el('<section class="card"><div class="card-head light">Längsta drive</div><div class="card-body" id="ldb"></div></section>');
-    const ldb = ld.querySelector('#ldb');
-    ldb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Slaget måste landa på fairway. '+PT.ldPerHole+' poäng per hål, delas vid lika.</p>'));
-    if(!R.ld.length) ldb.appendChild(el('<p class="empty-note">Inga drivehål valda. Välj dem under Inställningar.</p>'));
-    R.ld.forEach(h=>{
-      const wrap = el('<div class="subcard"><h4>Hål '+h+'</h4><div class="chips" id="l'+h+'"></div></div>');
-      const row = wrap.querySelector('#l'+h);
-      const cur = (S.ldWins.sim[h]||[]);
+    // scorecard
+    const st = roundStable(rid,pid);
+    const sc = el('<section class="card"><div class="card-head light">Scorekort<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">'+st.sum+' p</span></div><div class="card-body"><table class="holes"><thead><tr><th>Hål</th><th>Par</th><th></th><th style="text-align:right">Slag</th><th style="text-align:right">Resultat</th></tr></thead><tbody id="tb"></tbody></table></div></section>');
+    const tb = sc.querySelector('#tb');
+    const a = arr(rid,pid);
+    let strokeSum = 0;
+    for(let i=0;i<HOLES;i++){
+      const par = R.pars[i], v = a[i];
+      if(v!=null) strokeSum += v;
+      const pts = holePoints(v,par);
+      const lab = holeLabel(v,par);
+      const isTri = v!=null && (v-par)>=3;
+      const tags = (R.ctp.includes(i+1)?'<span class="tag">CTP</span>':'') + (rid==='sim'&&R.ld.includes(i+1)?'<span class="tag">LD</span>':'');
+      const tr = el('<tr'+(v!=null?' class="done"':'')+'>'+
+              '<td class="hno">'+(i+1)+'</td>'+
+              '<td class="par">Par '+par+'</td>'+
+              '<td class="tags">'+tags+'</td>'+
+              '<td><div class="stepper">'+
+              '<button aria-label="Ett slag mindre">−</button>'+
+              '<input class="strokes'+(v==null?' empty':'')+'" inputmode="numeric" value="'+(v==null?'–':v)+'">'+
+              '<button aria-label="Ett slag mer">+</button>'+
+              '</div></td>'+
+              '<td class="res'+(isTri?' tri':'')+'">'+(v==null?'<span style="color:#B7C2D0">–</span>':lab+' <b>'+pts+'</b>')+'</td>'+
+              '</tr>');
+      const [minus, plus] = tr.querySelectorAll('.stepper button');
+      const input = tr.querySelector('.strokes');
+      const setVal = (nv)=>{ a[i] = nv; save(); render(); };
+      minus.onclick = ()=> setVal(a[i]==null ? par : Math.max(1, a[i]-1));
+      plus.onclick  = ()=> setVal(a[i]==null ? par : Math.min(20, a[i]+1));
+      input.onfocus = e=>{ if(a[i]==null) e.target.value=''; e.target.select(); };
+      input.onblur = e=>{
+        const raw = e.target.value.trim();
+        if(raw===''||raw==='–'){ setVal(null); return; }
+        const n = parseInt(raw,10);
+        setVal(isNaN(n)?null:Math.min(20,Math.max(1,n)));
+      };
+      input.onkeydown = e=>{ if(e.key==='Enter') e.target.blur(); };
+      tb.appendChild(tr);
+    }
+    tb.appendChild(el('<tr class="totrow"><td colspan="3">Totalt</td><td style="text-align:right;font-family:\'IBM Plex Mono\',monospace">'+(strokeSum||'–')+'</td><td class="res"><b>'+st.sum+' p</b></td></tr>'));
+    const cleanNote = st.complete
+            ? (st.clean ? '<p class="empty-note" style="margin:10px 0 0;color:var(--blue)">Ronden klar utan trippelbogey: +5 poäng.</p>'
+                    : '<p class="empty-note" style="margin:10px 0 0">Ronden klar. Trippelbogey eller sämre noterad, ingen bonus.</p>')
+            : '<p class="empty-note" style="margin:10px 0 0">'+st.filled+' av 18 hål ifyllda.</p>';
+    sc.querySelector('.card-body').appendChild(el(cleanNote));
+    box.appendChild(sc);
+
+    // CTP
+    const ctp = el('<section class="card"><div class="card-head light">Closest to pin</div><div class="card-body" id="cb"></div></section>');
+    const cb = ctp.querySelector('#cb');
+    cb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Markera den som ligger närmast hål. Flera markerade delar på '+PT.ctpPerHole+' poäng.</p>'));
+    if(!R.ctp.length) cb.appendChild(el('<p class="empty-note">Inga CTP-hål valda för den här ronden. Välj dem under Inställningar.</p>'));
+    R.ctp.forEach(h=>{
+      const wrap = el('<div class="subcard"><h4>Hål '+h+' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par '+R.pars[h-1]+'</span></h4><div class="chips" id="c'+h+'"></div></div>');
+      const row = wrap.querySelector('#c'+h);
+      const cur = (S.ctpWins[rid][h]||[]);
       S.players.forEach(p=>{
         const on = cur.includes(p.id);
         const c = el('<button class="chip blue" aria-pressed="'+on+'">'+esc(p.name)+'</button>');
         c.onclick = ()=>{
-          const list = new Set(S.ldWins.sim[h]||[]);
+          const list = new Set(S.ctpWins[rid][h]||[]);
           list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-          S.ldWins.sim[h] = [...list];
-          if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h];
+          S.ctpWins[rid][h] = [...list];
+          if(!S.ctpWins[rid][h].length) delete S.ctpWins[rid][h];
           save(); render();
         };
         row.appendChild(c);
       });
-      if(cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+fmt(PT.ldPerHole/cur.length)+' poäng var.</p>'));
-      ldb.appendChild(wrap);
+      if(cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+fmt(PT.ctpPerHole/cur.length)+' poäng var.</p>'));
+      cb.appendChild(wrap);
     });
-    box.appendChild(ld);
+    box.appendChild(ctp);
+
+    // Longest drive (sim only)
+    if(rid==='sim'){
+      const ld = el('<section class="card"><div class="card-head light">Längsta drive</div><div class="card-body" id="ldb"></div></section>');
+      const ldb = ld.querySelector('#ldb');
+      ldb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Slaget måste landa på fairway. '+PT.ldPerHole+' poäng per hål, delas vid lika.</p>'));
+      if(!R.ld.length) ldb.appendChild(el('<p class="empty-note">Inga drivehål valda. Välj dem under Inställningar.</p>'));
+      R.ld.forEach(h=>{
+        const wrap = el('<div class="subcard"><h4>Hål '+h+'</h4><div class="chips" id="l'+h+'"></div></div>');
+        const row = wrap.querySelector('#l'+h);
+        const cur = (S.ldWins.sim[h]||[]);
+        S.players.forEach(p=>{
+          const on = cur.includes(p.id);
+          const c = el('<button class="chip blue" aria-pressed="'+on+'">'+esc(p.name)+'</button>');
+          c.onclick = ()=>{
+            const list = new Set(S.ldWins.sim[h]||[]);
+            list.has(p.id) ? list.delete(p.id) : list.add(p.id);
+            S.ldWins.sim[h] = [...list];
+            if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h];
+            save(); render();
+          };
+          row.appendChild(c);
+        });
+        if(cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+fmt(PT.ldPerHole/cur.length)+' poäng var.</p>'));
+        ldb.appendChild(wrap);
+      });
+      box.appendChild(ld);
+    }
+    return box;
   }
-  return box;
-}
 
-function renderConfig(){
-  const box = el('<div></div>');
+  function renderConfig(){
+    const box = el('<div></div>');
 
-  // players
-  const pc = el('<section class="card"><div class="card-head">Spelare</div><div class="card-body" id="pl"></div></section>');
-  const pl = pc.querySelector('#pl');
-  S.players.forEach(p=>{
-    const f = el('<div class="field"><input type="text" value="'+esc(p.name)+'"><button class="btn danger" style="padding:8px 12px">Ta bort</button></div>');
-    const [inp, del] = [f.querySelector('input'), f.querySelector('button')];
-    inp.onblur = ()=>{ p.name = inp.value.trim() || 'Spelare'; save(); render(); };
-    inp.onkeydown = e=>{ if(e.key==='Enter') e.target.blur(); };
-    del.onclick = ()=>{
-      S.players = S.players.filter(x=>x.id!==p.id);
-      ['bana','sim'].forEach(r=>{ delete (S.strokes[r]||{})[p.id];
-        Object.keys(S.ctpWins[r]).forEach(h=>{ S.ctpWins[r][h]=S.ctpWins[r][h].filter(i=>i!==p.id); if(!S.ctpWins[r][h].length) delete S.ctpWins[r][h]; }); });
-      Object.keys(S.ldWins.sim).forEach(h=>{ S.ldWins.sim[h]=S.ldWins.sim[h].filter(i=>i!==p.id); if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h]; });
-      save(); render();
-    };
-    pl.appendChild(f);
-  });
-  const add = el('<button class="btn ghost">+ Lägg till spelare</button>');
-  add.onclick = ()=>{ S.players.push({id:uid(), name:'Spelare '+(S.players.length+1)}); save(); render(); };
-  pl.appendChild(add);
-  box.appendChild(pc);
-
-  // rounds
-  ['bana','sim'].forEach(rid=>{
-    const R = S.rounds[rid];
-    const total = R.pars.reduce((a,b)=>a+b,0);
-    const c = el('<section class="card"><div class="card-head light">'+esc(R.label)+'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">Par '+total+'</span></div><div class="card-body" id="rb"></div></section>');
-    const rb = c.querySelector('#rb');
-
-    rb.appendChild(el('<h3 class="sec">Par per hål</h3>'));
-    const grid = el('<div class="parGrid"></div>');
-    R.pars.forEach((p,i)=>{
-      const cell = el('<div class="parCell"><span>Hål '+(i+1)+'</span><input type="number" min="3" max="6" value="'+p+'"></div>');
-      const inp = cell.querySelector('input');
-      inp.onchange = ()=>{ R.pars[i] = Math.min(6, Math.max(3, parseInt(inp.value,10)||4)); save(); render(); };
-      grid.appendChild(cell);
-    });
-    rb.appendChild(grid);
-
-    const par3 = R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p===3).map(x=>x.h);
-    rb.appendChild(el('<h3 class="sec" style="margin-top:18px">Closest to pin – välj 2 hål</h3>'));
-    const ctpRow = el('<div class="chips"></div>');
-    (par3.length?par3:R.pars.map((_,i)=>i+1)).forEach(h=>{
-      const on = R.ctp.includes(h);
-      const b = el('<button class="chip blue" aria-pressed="'+on+'">Hål '+h+'</button>');
-      b.onclick = ()=>{
-        R.ctp = on ? R.ctp.filter(x=>x!==h) : [...R.ctp, h].sort((a,b)=>a-b);
-        if(!on && !S.ctpWins[rid][h]) {}
+    // players
+    const pc = el('<section class="card"><div class="card-head">Spelare</div><div class="card-body" id="pl"></div></section>');
+    const pl = pc.querySelector('#pl');
+    S.players.forEach(p=>{
+      const f = el('<div class="field"><input type="text" value="'+esc(p.name)+'"><button class="btn danger" style="padding:8px 12px">Ta bort</button></div>');
+      const [inp, del] = [f.querySelector('input'), f.querySelector('button')];
+      inp.onblur = ()=>{ p.name = inp.value.trim() || 'Spelare'; save(); render(); };
+      inp.onkeydown = e=>{ if(e.key==='Enter') e.target.blur(); };
+      del.onclick = ()=>{
+        S.players = S.players.filter(x=>x.id!==p.id);
+        ['bana','sim'].forEach(r=>{ delete (S.strokes[r]||{})[p.id];
+          Object.keys(S.ctpWins[r]).forEach(h=>{ S.ctpWins[r][h]=S.ctpWins[r][h].filter(i=>i!==p.id); if(!S.ctpWins[r][h].length) delete S.ctpWins[r][h]; }); });
+        Object.keys(S.ldWins.sim).forEach(h=>{ S.ldWins.sim[h]=S.ldWins.sim[h].filter(i=>i!==p.id); if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h]; });
         save(); render();
       };
-      ctpRow.appendChild(b);
+      pl.appendChild(f);
     });
-    rb.appendChild(ctpRow);
-    rb.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+(par3.length?'Visar bara par 3-hål.':'Inga par 3-hål inlagda ännu – välj par först.')+'</p>'));
+    const add = el('<button class="btn ghost">+ Lägg till spelare</button>');
+    add.onclick = ()=>{ S.players.push({id:uid(), name:'Spelare '+(S.players.length+1)}); save(); render(); };
+    pl.appendChild(add);
+    box.appendChild(pc);
 
-    if(rid==='sim'){
-      rb.appendChild(el('<h3 class="sec" style="margin-top:18px">Längsta drive – välj 2 hål</h3>'));
-      const ldRow = el('<div class="chips"></div>');
-      R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p>=4).forEach(x=>{
-        const on = R.ld.includes(x.h);
-        const b = el('<button class="chip blue" aria-pressed="'+on+'">Hål '+x.h+'</button>');
-        b.onclick = ()=>{ R.ld = on ? R.ld.filter(y=>y!==x.h) : [...R.ld, x.h].sort((a,b)=>a-b); save(); render(); };
-        ldRow.appendChild(b);
+    // rounds
+    ['bana','sim'].forEach(rid=>{
+      const R = S.rounds[rid];
+      const total = R.pars.reduce((a,b)=>a+b,0);
+      const c = el('<section class="card"><div class="card-head light">'+esc(R.label)+'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">Par '+total+'</span></div><div class="card-body" id="rb"></div></section>');
+      const rb = c.querySelector('#rb');
+
+      rb.appendChild(el('<h3 class="sec">Par per hål</h3>'));
+      const grid = el('<div class="parGrid"></div>');
+      R.pars.forEach((p,i)=>{
+        const cell = el('<div class="parCell"><span>Hål '+(i+1)+'</span><input type="number" min="3" max="6" value="'+p+'"></div>');
+        const inp = cell.querySelector('input');
+        inp.onchange = ()=>{ R.pars[i] = Math.min(6, Math.max(3, parseInt(inp.value,10)||4)); save(); render(); };
+        grid.appendChild(cell);
       });
-      rb.appendChild(ldRow);
-    }
-    box.appendChild(c);
-  });
+      rb.appendChild(grid);
 
-  // reset
-  const rc = el('<section class="card"><div class="card-body"><h3 class="sec">Nollställ</h3><p class="empty-note" style="margin:0 0 10px">Tar bort alla slag, CTP- och drivemarkeringar. Spelare och par behålls.</p><button class="btn danger">Nollställ alla resultat</button></div></section>');
-  rc.querySelector('button').onclick = ()=>{
-    rc.querySelector('button').textContent = 'Tryck igen för att bekräfta';
+      const par3 = R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p===3).map(x=>x.h);
+      rb.appendChild(el('<h3 class="sec" style="margin-top:18px">Closest to pin – välj 2 hål</h3>'));
+      const ctpRow = el('<div class="chips"></div>');
+      (par3.length?par3:R.pars.map((_,i)=>i+1)).forEach(h=>{
+        const on = R.ctp.includes(h);
+        const b = el('<button class="chip blue" aria-pressed="'+on+'">Hål '+h+'</button>');
+        b.onclick = ()=>{
+          R.ctp = on ? R.ctp.filter(x=>x!==h) : [...R.ctp, h].sort((a,b)=>a-b);
+          if(!on && !S.ctpWins[rid][h]) {}
+          save(); render();
+        };
+        ctpRow.appendChild(b);
+      });
+      rb.appendChild(ctpRow);
+      rb.appendChild(el('<p class="empty-note" style="margin:8px 0 0">'+(par3.length?'Visar bara par 3-hål.':'Inga par 3-hål inlagda ännu – välj par först.')+'</p>'));
+
+      if(rid==='sim'){
+        rb.appendChild(el('<h3 class="sec" style="margin-top:18px">Längsta drive – välj 2 hål</h3>'));
+        const ldRow = el('<div class="chips"></div>');
+        R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p>=4).forEach(x=>{
+          const on = R.ld.includes(x.h);
+          const b = el('<button class="chip blue" aria-pressed="'+on+'">Hål '+x.h+'</button>');
+          b.onclick = ()=>{ R.ld = on ? R.ld.filter(y=>y!==x.h) : [...R.ld, x.h].sort((a,b)=>a-b); save(); render(); };
+          ldRow.appendChild(b);
+        });
+        rb.appendChild(ldRow);
+      }
+      box.appendChild(c);
+    });
+
+    // reset
+    const rc = el('<section class="card"><div class="card-body"><h3 class="sec">Nollställ</h3><p class="empty-note" style="margin:0 0 10px">Tar bort alla slag, CTP- och drivemarkeringar. Spelare och par behålls.</p><button class="btn danger">Nollställ alla resultat</button></div></section>');
     rc.querySelector('button').onclick = ()=>{
-      S.strokes = {bana:{}, sim:{}};
-      S.ctpWins = {bana:{}, sim:{}};
-      S.ldWins = {sim:{}};
-      save(); render();
+      rc.querySelector('button').textContent = 'Tryck igen för att bekräfta';
+      rc.querySelector('button').onclick = ()=>{
+        S.strokes = {bana:{}, sim:{}};
+        S.ctpWins = {bana:{}, sim:{}};
+        S.ldWins = {sim:{}};
+        save(); render();
+      };
     };
-  };
-  box.appendChild(rc);
-  return box;
-}
+    box.appendChild(rc);
+    return box;
+  }
 
-document.querySelectorAll('.tab').forEach(t=>{
-  t.onclick = ()=>{ tab = t.dataset.tab; render(); };
-});
-load();
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.onclick = ()=>{ tab = t.dataset.tab; render(); };
+  });
+  load();
 </script>
