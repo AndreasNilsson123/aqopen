@@ -69,4 +69,4 @@ That is usually fine for a four-player company outing on an unguessable site
 name. To lock it down, Netlify's password protection (site-wide, paid plans)
 is the least intrusive option; otherwise put a shared secret in an
 `x-aqopen-key` header and check it against a Netlify environment variable in
-`state.mjs`.
+`netlify/functions/state.mjs`.
