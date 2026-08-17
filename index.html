@@ -201,6 +201,24 @@
   @media (prefers-reduced-motion:no-preference){
     .card{transition:box-shadow .2s ease}
   }
+
+  /* spelläge */
+  .gm-hole{display:flex;align-items:center;gap:16px;padding-bottom:6px}
+  .gm-num{font-family:"Barlow Condensed",sans-serif;font-size:60px;font-weight:700;line-height:.9;color:var(--navy)}
+  .gm-par{font-size:15px;color:var(--muted);margin-bottom:4px}
+  .gm-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+  .gm-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gm-pts{font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .gm-nav{display:flex;gap:8px;margin-top:16px}
+  .gm-nav .btn{flex:1;padding:15px 10px}
+  .gm-nav .btn[disabled]{pointer-events:none}
+  .gm-dots{display:flex;flex-wrap:wrap;gap:5px}
+  .gm-dot{
+    width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:#fff;
+    font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);cursor:pointer;
+  }
+  .gm-dot.filled{background:var(--blue-soft);border-color:#BBD3EA;color:var(--navy)}
+  .gm-dot.now{background:var(--navy);border-color:var(--navy);color:#fff}
 </style>
 
 <div class="wrap">
@@ -214,6 +232,7 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="lb" aria-selected="true">Ställning</button>
+    <button class="tab" role="tab" data-tab="spel" aria-selected="false">Spela</button>
     <button class="tab" role="tab" data-tab="bana" aria-selected="false">Bana</button>
     <button class="tab" role="tab" data-tab="sim" aria-selected="false">Simulator</button>
     <button class="tab" role="tab" data-tab="cfg" aria-selected="false">Inställningar</button>
@@ -237,14 +256,36 @@
       event:'AqOpen Sweden',
       players: names.map(n=>({id:uid(), name:n})),
       rounds:{
-        bana:{label:'Bana (ute)', pars:[...pars], ctp:[3,12], ld:[]},
-        sim: {label:'Simulator',  pars:[...pars], ctp:[7,16], ld:[5,14]}
+        bana:{label:'Bana (ute)', courseName:'', pars:[...pars], ctp:[3,12], ld:[]},
+        sim: {label:'Simulator',  courseName:'', pars:[...pars], ctp:[7,16], ld:[5,14]}
       },
+      live: null,          // {round, hole} – vilket hål spellaget står på just nu
+      customCourses: [],   // banor sparade från appen
       strokes:{bana:{}, sim:{}},   // roundId -> playerId -> [18]
       ctpWins:{bana:{}, sim:{}},   // roundId -> hole -> [playerId]
       ldWins:{sim:{}}              // hole -> [playerId]
     };
   }
+
+  /* Banbibliotek. courses.json ligger i repot och kan utökas med en push.
+     Egna banor sparade i appen ligger i S.customCourses och delas med alla. */
+  const BUILTIN_COURSES = [
+    {name:'Standard par 72', pars:[4,4,3,5,4,4,3,4,5,4,3,4,5,4,4,3,4,5]},
+    {name:'Standard par 71', pars:[4,4,3,5,4,4,3,4,4,4,3,4,5,4,4,3,4,5]},
+    {name:'Standard par 70', pars:[4,4,3,5,4,4,3,4,4,4,3,4,4,4,4,3,4,5]}
+  ];
+  let COURSES = BUILTIN_COURSES.slice();
+  async function loadCourses(){
+    try{
+      const r = await fetch('courses.json', {cache:'no-store'});
+      if(!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      if(Array.isArray(d.courses) && d.courses.length){
+        COURSES = d.courses.filter(c=>Array.isArray(c.pars) && c.pars.length===HOLES);
+      }
+    }catch(e){ /* filen saknas: de inbyggda mallarna duger */ }
+  }
+  const allCourses = () => COURSES.concat((S.customCourses||[]).map(c=>({...c, own:true})));
 
   let S = defaultState();
   let tab = 'lb';
@@ -385,6 +426,7 @@
   }
 
   async function load(){
+    await loadCourses();
     const cached = localStorage.getItem(LOCAL_KEY);
     if(cached){
       try{
@@ -489,6 +531,20 @@
       const add = splitPoints(winners, PT.comeback);
       Object.keys(add).forEach(pid=>{ res[pid].cb += add[pid]; });
     }
+    // Comeback just nu: jämför bara hål som är ifyllda i BÅDA ronderna, så
+    // ställningen blir rättvis medan simulatorronden fortfarande pågår.
+    S.players.forEach(p=>{
+      const b = arr('bana',p.id), sm = arr('sim',p.id);
+      let db=0, ds=0, n=0;
+      for(let i=0;i<HOLES;i++){
+        if(b[i]!=null && sm[i]!=null){
+          db += holePoints(b[i], S.rounds.bana.pars[i]);
+          ds += holePoints(sm[i], S.rounds.sim.pars[i]);
+          n++;
+        }
+      }
+      res[p.id].live = {holes:n, delta: n ? ds-db : null, bana:db, sim:ds};
+    });
     S.players.forEach(p=>{
       const r = res[p.id];
       r.total = r.stableBana + r.stableSim + r.ctp + r.ld + r.tri + r.cb;
@@ -508,6 +564,7 @@
     v.innerHTML = '';
     document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', String(t.dataset.tab===tab)));
     if(tab==='lb') v.appendChild(renderLeaderboard());
+    else if(tab==='spel') v.appendChild(renderGame());
     else if(tab==='cfg') v.appendChild(renderConfig());
     else v.appendChild(renderRound(tab));
     window.scrollTo({top:0, behavior:'instant'});
@@ -575,10 +632,34 @@
             lead('Längsta drive', r=>r.ld) +
             lead('No trippelbogey', r=>r.tri) +
             lead('Comeback', r=>r.cb);
-    const cbList = S.players.filter(p=>res[p.id].delta!=null)
-            .map(p=>esc(p.name)+' '+(res[p.id].delta>0?'+':'')+res[p.id].delta).join(' · ');
-    d.appendChild(el('<p class="empty-note" style="margin:12px 0 0">Comeback räknas när båda ronderna är ifyllda.'+(cbList?' Skillnad sim − bana: '+cbList:'')+'</p>'));
+    d.appendChild(el('<p class="empty-note" style="margin:12px 0 0">Comeback avgörs när båda ronderna är ifyllda.</p>'));
     box.appendChild(dp);
+
+    // Comeback under pågående simulatorrond
+    const liveMax = Math.max(0, ...S.players.map(p=>res[p.id].live.holes));
+    if(liveMax > 0){
+      const done = S.players.every(p=>roundStable('sim',p.id).complete);
+      const cbc = el('<section class="card"><div class="card-head light">Comeback just nu'+
+              '<span style="font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400">'+
+              (done?'Slutresultat':'Preliminärt')+'</span></div><div class="card-body" id="cbl"></div></section>');
+      const cbl = cbc.querySelector('#cbl');
+      cbl.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Simulator minus bana på de hål som är ifyllda i båda ronderna. '+
+              (done?'':'Ändras medan ronden pågår.')+'</p>'));
+      const ranked = [...S.players].filter(p=>res[p.id].live.holes>0)
+              .sort((a,b)=>res[b.id].live.delta-res[a.id].live.delta);
+      const top = ranked.length ? res[ranked[0].id].live.delta : 0;
+      ranked.forEach(p=>{
+        const L = res[p.id].live;
+        const lead = L.delta===top && L.delta>0;
+        cbl.appendChild(el('<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--line)">'+
+                '<span style="font-weight:'+(lead?'600':'400')+'">'+esc(p.name)+
+                (lead?' <span class="tag" style="background:#F5EBC8;color:#8A6D10">Leder</span>':'')+'</span>'+
+                '<span style="text-align:right;white-space:nowrap"><b style="font-family:\'IBM Plex Mono\',monospace;color:'+
+                (L.delta>0?'var(--blue)':'var(--muted)')+'">'+(L.delta>0?'+':'')+L.delta+'</b>'+
+                '<span class="empty-note" style="margin-left:8px">'+L.bana+'→'+L.sim+' p · '+L.holes+' hål</span></span></div>'));
+      });
+      box.appendChild(cbc);
+    }
 
     const rules = el('<section class="card"><div class="card-head light">Poängregler</div><div class="card-body"><ul class="rules" style="margin:0;padding-left:18px">'+
             '<li>Stableford per hål: eagle eller bättre 12, birdie 6, par 3, bogey 2, dubbelbogey 1, trippelbogey eller sämre 0.</li>'+
@@ -714,6 +795,183 @@
     return box;
   }
 
+  /* Byter bana på en rond och håller CTP/drive-valen giltiga:
+     CTP måste ligga på par 3, längsta drive på par 4 eller längre. */
+  function fixHoleChoices(rid){
+    const R = S.rounds[rid];
+    const par3 = R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p===3).map(x=>x.h);
+    R.ctp = R.ctp.filter(h=>par3.includes(h));
+    par3.forEach(h=>{ if(R.ctp.length<2 && !R.ctp.includes(h)) R.ctp.push(h); });
+    R.ctp.sort((a,b)=>a-b);
+    if(rid==='sim'){
+      const long = R.pars.map((p,i)=>({p,h:i+1})).filter(x=>x.p>=4);
+      R.ld = R.ld.filter(h=>long.some(x=>x.h===h));
+      long.filter(x=>x.p===5).forEach(x=>{ if(R.ld.length<2 && !R.ld.includes(x.h)) R.ld.push(x.h); });
+      R.ld.sort((a,b)=>a-b);
+    }
+    // markeringar på hål som inte längre gäller ska inte ge poäng
+    Object.keys(S.ctpWins[rid]).forEach(h=>{ if(!R.ctp.includes(+h)) delete S.ctpWins[rid][h]; });
+    if(rid==='sim') Object.keys(S.ldWins.sim).forEach(h=>{ if(!R.ld.includes(+h)) delete S.ldWins.sim[h]; });
+  }
+  function applyCourse(rid, course){
+    if(!course) return;
+    const R = S.rounds[rid];
+    R.pars = [...course.pars];
+    R.courseName = course.name;
+    fixHoleChoices(rid);
+    save();
+  }
+
+  /* ---------- spelläge ---------- */
+  function firstOpenHole(rid){
+    for(let i=0;i<HOLES;i++){
+      if(S.players.some(p=>arr(rid,p.id)[i]==null)) return i+1;
+    }
+    return HOLES;
+  }
+  function winnerChips(list, onToggle, points){
+    const row = el('<div class="chips"></div>');
+    S.players.forEach(p=>{
+      const on = list.includes(p.id);
+      const c = el('<button class="chip blue" aria-pressed="'+on+'">'+esc(p.name)+'</button>');
+      c.onclick = ()=>onToggle(p.id);
+      row.appendChild(c);
+    });
+    if(list.length>1) row.appendChild(el('<span class="empty-note" style="align-self:center">'+fmt(points/list.length)+' p var</span>'));
+    return row;
+  }
+
+  function renderGame(){
+    const box = el('<div></div>');
+    if(!S.players.length){
+      box.appendChild(el('<section class="card"><div class="card-body"><p class="empty-note">Lägg till spelare under Inställningar först.</p></div></section>'));
+      return box;
+    }
+
+    if(!S.live){
+      const c = el('<section class="card"><div class="card-head">Spelläge</div><div class="card-body" id="gs"></div></section>');
+      const gs = c.querySelector('#gs');
+      gs.appendChild(el('<p class="empty-note" style="margin:0 0 12px">Ett hål i taget, alla fyra spelarna på samma skärm. Alla telefoner följer samma hål.</p>'));
+      ['bana','sim'].forEach(rid=>{
+        const R = S.rounds[rid];
+        const filled = S.players.reduce((n,p)=>n+arr(rid,p.id).filter(v=>v!=null).length,0);
+        const of = S.players.length*HOLES;
+        const started = filled>0;
+        const b = el('<button class="btn" style="width:100%;margin-bottom:10px;padding:16px;text-align:left">'+
+                (started?'Fortsätt ':'Starta ')+esc(R.label)+
+                '<span style="display:block;font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400;opacity:.8;margin-top:4px">'+
+                (R.courseName?esc(R.courseName)+' · ':'')+'par '+R.pars.reduce((a,b)=>a+b,0)+' · '+filled+'/'+of+' noteringar</span></button>');
+        b.onclick = ()=>{ S.live = {round:rid, hole:firstOpenHole(rid)}; save(); render(); };
+        gs.appendChild(b);
+      });
+      box.appendChild(c);
+      return box;
+    }
+
+    const rid = S.live.round, R = S.rounds[rid];
+    const h = Math.min(HOLES, Math.max(1, S.live.hole)), par = R.pars[h-1];
+    const isCtp = R.ctp.includes(h), isLd = rid==='sim' && R.ld.includes(h);
+
+    const head = el('<section class="card"><div class="card-head">'+esc(R.label)+
+            '<span style="font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400;opacity:.8">Hål '+h+' av '+HOLES+'</span></div>'+
+            '<div class="card-body"><div class="gm-hole"><div class="gm-num">'+h+'</div>'+
+            '<div><div class="gm-par">Par '+par+'</div>'+
+            (isCtp?'<span class="tag">CLOSEST TO PIN</span>':'')+(isLd?'<span class="tag">LÄNGSTA DRIVE</span>':'')+
+            '</div></div><div id="gp"></div></div></section>');
+    const gp = head.querySelector('#gp');
+
+    S.players.forEach(p=>{
+      const a = arr(rid,p.id), v = a[h-1];
+      const row = el('<div class="gm-row">'+
+              '<span class="gm-name">'+esc(p.name)+'</span>'+
+              '<span class="gm-pts">'+(v==null?'–':holeLabel(v,par)+' '+holePoints(v,par)+'p')+'</span>'+
+              '<span class="stepper"><button aria-label="Ett slag mindre">−</button>'+
+              '<input class="strokes'+(v==null?' empty':'')+'" inputmode="numeric" value="'+(v==null?'–':v)+'">'+
+              '<button aria-label="Ett slag mer">+</button></span></div>');
+      const [minus, plus] = row.querySelectorAll('.stepper button');
+      const input = row.querySelector('.strokes');
+      const set = nv => { a[h-1] = nv; save(); render(); };
+      minus.onclick = ()=> set(a[h-1]==null ? par : Math.max(1, a[h-1]-1));
+      plus.onclick  = ()=> set(a[h-1]==null ? par : Math.min(20, a[h-1]+1));
+      input.onfocus = e=>{ if(a[h-1]==null) e.target.value=''; e.target.select(); };
+      input.onblur = e=>{
+        const raw = e.target.value.trim();
+        if(raw===''||raw==='–') return set(null);
+        const n = parseInt(raw,10);
+        set(isNaN(n)?null:Math.min(20,Math.max(1,n)));
+      };
+      input.onkeydown = e=>{ if(e.key==='Enter') e.target.blur(); };
+      gp.appendChild(row);
+    });
+
+    if(isCtp){
+      const cur = S.ctpWins[rid][h]||[];
+      const w = el('<div class="subcard"><h4>Närmast hål</h4><p>5 poäng, delas vid lika.</p></div>');
+      w.appendChild(winnerChips(cur, pid=>{
+        const l = new Set(S.ctpWins[rid][h]||[]);
+        l.has(pid) ? l.delete(pid) : l.add(pid);
+        S.ctpWins[rid][h] = [...l];
+        if(!S.ctpWins[rid][h].length) delete S.ctpWins[rid][h];
+        save(); render();
+      }, PT.ctpPerHole));
+      head.querySelector('.card-body').appendChild(w);
+    }
+    if(isLd){
+      const cur = S.ldWins.sim[h]||[];
+      const w = el('<div class="subcard"><h4>Längsta drive</h4><p>Måste landa på fairway. 5 poäng, delas vid lika.</p></div>');
+      w.appendChild(winnerChips(cur, pid=>{
+        const l = new Set(S.ldWins.sim[h]||[]);
+        l.has(pid) ? l.delete(pid) : l.add(pid);
+        S.ldWins.sim[h] = [...l];
+        if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h];
+        save(); render();
+      }, PT.ldPerHole));
+      head.querySelector('.card-body').appendChild(w);
+    }
+
+    // navigering
+    const nav = el('<div class="gm-nav"></div>');
+    const prev = el('<button class="btn ghost"'+(h===1?' disabled style="opacity:.4"':'')+'>← Hål '+(h-1)+'</button>');
+    prev.onclick = ()=>{ if(h>1){ S.live.hole = h-1; save(); render(); } };
+    const next = el('<button class="btn">'+(h===HOLES?'Avsluta ronden':'Nästa hål →')+'</button>');
+    next.onclick = ()=>{
+      if(h===HOLES){ S.live = null; tab='lb'; save(); render(); }
+      else { S.live.hole = h+1; save(); render(); }
+    };
+    nav.appendChild(prev); nav.appendChild(next);
+    head.querySelector('.card-body').appendChild(nav);
+
+    const openHoles = S.players.some(p=>arr(rid,p.id)[h-1]==null);
+    if(openHoles) head.querySelector('.card-body').appendChild(
+            el('<p class="empty-note" style="margin:10px 0 0">Alla spelare är inte ifyllda på det här hålet.</p>'));
+    box.appendChild(head);
+
+    // hålöversikt
+    const dots = el('<section class="card"><div class="card-body"><h3 class="sec">Hoppa till hål</h3><div class="gm-dots" id="gd"></div></div></section>');
+    const gd = dots.querySelector('#gd');
+    for(let i=1;i<=HOLES;i++){
+      const full = S.players.every(p=>arr(rid,p.id)[i-1]!=null);
+      const d = el('<button class="gm-dot'+(full?' filled':'')+(i===h?' now':'')+'">'+i+'</button>');
+      d.onclick = ()=>{ S.live.hole = i; save(); render(); };
+      gd.appendChild(d);
+    }
+    const stop = el('<button class="btn ghost" style="width:100%;margin-top:12px">Lämna spelläget</button>');
+    stop.onclick = ()=>{ S.live = null; save(); render(); };
+    dots.querySelector('.card-body').appendChild(stop);
+    box.appendChild(dots);
+
+    // ställning i ronden
+    const st = el('<section class="card"><div class="card-head light">Ställning i ronden</div><div class="card-body" id="gst"></div></section>');
+    const gst = st.querySelector('#gst');
+    [...S.players].map(p=>({p, r:roundStable(rid,p.id)})).sort((a,b)=>b.r.sum-a.r.sum).forEach(x=>{
+      gst.appendChild(el('<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line)">'+
+              '<span>'+esc(x.p.name)+'</span><span><b style="font-family:\'IBM Plex Mono\',monospace">'+x.r.sum+' p</b>'+
+              '<span class="empty-note" style="margin-left:8px">'+x.r.filled+' hål</span></span></div>'));
+    });
+    box.appendChild(st);
+    return box;
+  }
+
   function renderConfig(){
     const box = el('<div></div>');
 
@@ -746,7 +1004,77 @@
       const c = el('<section class="card"><div class="card-head light">'+esc(R.label)+'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">Par '+total+'</span></div><div class="card-body" id="rb"></div></section>');
       const rb = c.querySelector('#rb');
 
-      rb.appendChild(el('<h3 class="sec">Par per hål</h3>'));
+      // banval
+      rb.appendChild(el('<h3 class="sec">Bana</h3>'));
+      const list = allCourses();
+      const sel = el('<select><option value="">Välj bana…</option></select>');
+      list.forEach((c,ix)=>{
+        const o = document.createElement('option');
+        o.value = String(ix);
+        o.textContent = c.name + (c.own?' (egen)':'') + ' · par ' + c.pars.reduce((a,b)=>a+b,0);
+        if(c.name===R.courseName) o.selected = true;
+        sel.appendChild(o);
+      });
+      const applyRow = el('<div class="field" style="align-items:stretch"></div>');
+      applyRow.appendChild(sel);
+      const useBtn = el('<button class="btn" style="white-space:nowrap">Använd</button>');
+      useBtn.onclick = ()=>{
+        if(sel.value==='') return;
+        applyCourse(rid, list[+sel.value]);
+        render();
+      };
+      applyRow.appendChild(useBtn);
+      rb.appendChild(applyRow);
+      if(R.courseName) rb.appendChild(el('<p class="empty-note" style="margin:0 0 6px">Vald bana: '+esc(R.courseName)+'</p>'));
+      const chosen = list[+sel.value];
+      if(chosen && chosen.note) rb.appendChild(el('<p class="empty-note" style="margin:0 0 6px">'+esc(chosen.note)+'</p>'));
+
+      // klistra in par
+      const paste = el('<div class="subcard"><h4>Klistra in par från scorekortet</h4>'+
+              '<p>18 siffror, hål 1 först. Mellanslag, komma eller radbrytning spelar ingen roll.</p>'+
+              '<input type="text" placeholder="4 4 3 5 4 4 3 4 5 4 3 4 5 4 4 3 4 5">'+
+              '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn ghost">Läs in par</button></div>'+
+              '<p class="empty-note" id="pmsg" style="margin:8px 0 0"></p></div>');
+      const pInput = paste.querySelector('input'), pMsg = paste.querySelector('#pmsg');
+      paste.querySelector('button').onclick = ()=>{
+        const nums = (pInput.value.match(/\d+/g)||[]).map(Number);
+        if(nums.length!==HOLES){ pMsg.textContent = 'Hittade '+nums.length+' siffror, behöver 18.'; return; }
+        if(nums.some(n=>n<3||n>6)){ pMsg.textContent = 'Par ska ligga mellan 3 och 6.'; return; }
+        R.pars = nums; R.courseName = R.courseName || 'Inklistrad bana';
+        fixHoleChoices(rid); save(); render();
+      };
+      rb.appendChild(paste);
+
+      // spara som egen bana
+      const saveC = el('<div class="subcard"><h4>Spara som egen bana</h4>'+
+              '<p>Hamnar i listan ovan för alla som använder sidan.</p>'+
+              '<input type="text" placeholder="Namn, t.ex. Bro Hof – Stadium">'+
+              '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn ghost">Spara bana</button></div></div>');
+      const cName = saveC.querySelector('input');
+      saveC.querySelector('button').onclick = ()=>{
+        const nm = cName.value.trim();
+        if(!nm) return;
+        S.customCourses = (S.customCourses||[]).filter(c=>c.name!==nm);
+        S.customCourses.push({name:nm, pars:[...R.pars]});
+        R.courseName = nm;
+        save(); render();
+      };
+      rb.appendChild(saveC);
+
+      if((S.customCourses||[]).length){
+        const own = el('<div style="margin-top:12px"><h3 class="sec">Egna banor</h3></div>');
+        S.customCourses.forEach(c=>{
+          const line = el('<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line)">'+
+                  '<span style="font-size:13.5px">'+esc(c.name)+' <span class="empty-note">par '+c.pars.reduce((a,b)=>a+b,0)+'</span></span></div>');
+          const del = el('<button class="btn danger" style="padding:6px 10px">Ta bort</button>');
+          del.onclick = ()=>{ S.customCourses = S.customCourses.filter(x=>x.name!==c.name); save(); render(); };
+          line.appendChild(del);
+          own.appendChild(line);
+        });
+        rb.appendChild(own);
+      }
+
+      rb.appendChild(el('<h3 class="sec" style="margin-top:18px">Par per hål</h3>'));
       const grid = el('<div class="parGrid"></div>');
       R.pars.forEach((p,i)=>{
         const cell = el('<div class="parCell"><span>Hål '+(i+1)+'</span><input type="number" min="3" max="6" value="'+p+'"></div>');

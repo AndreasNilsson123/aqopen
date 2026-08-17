@@ -1,0 +1,30 @@
+{
+  "_readme": "Banbibliotek för AqOpen. Lägg till banor här och pusha — de dyker upp i Inställningar. 'pars' måste ha 18 värden, hål 1 först. 'note' visas som liten hjälptext. Du kan också klistra in par direkt i appen och spara banan därifrån, utan att röra den här filen.",
+  "courses": [
+    {
+      "name": "Standard par 72",
+      "pars": [4, 4, 3, 5, 4, 4, 3, 4, 5, 4, 3, 4, 5, 4, 4, 3, 4, 5],
+      "note": "Neutral mall: fyra par 3, fyra par 5."
+    },
+    {
+      "name": "Standard par 71",
+      "pars": [4, 4, 3, 5, 4, 4, 3, 4, 4, 4, 3, 4, 5, 4, 4, 3, 4, 5],
+      "note": "Neutral mall."
+    },
+    {
+      "name": "Standard par 70",
+      "pars": [4, 4, 3, 5, 4, 4, 3, 4, 4, 4, 3, 4, 4, 4, 4, 3, 4, 5],
+      "note": "Neutral mall."
+    },
+    {
+      "name": "St Andrews – Old Course",
+      "pars": [4, 4, 4, 4, 5, 4, 4, 3, 4, 4, 3, 4, 4, 5, 4, 4, 4, 4],
+      "note": "Simulatorklassiker, par 72. Kontrollera mot simulatorns scorekort."
+    },
+    {
+      "name": "Pebble Beach",
+      "pars": [4, 5, 4, 4, 3, 5, 3, 4, 4, 4, 4, 3, 4, 5, 4, 4, 3, 5],
+      "note": "Simulatorklassiker, par 72. Kontrollera mot simulatorns scorekort."
+    }
+  ]
+}

@@ -5,6 +5,7 @@ stored in Netlify Blobs. Four phones, one leaderboard.
 
 ```
 index.html                     the whole front end, no build step
+courses.json                   course library: names + 18 pars each
 netlify/functions/state.mjs    GET/PUT /api/state, backed by Netlify Blobs
 netlify.toml                   publish dir + functions dir
 package.json                   one dependency: @netlify/blobs
@@ -54,6 +55,23 @@ Clients poll every 6 seconds, and immediately when a phone wakes up. If the
 API is unreachable the app keeps scoring against `localStorage` and pushes up
 when the connection returns; the status bar says which mode it's in.
 
+## Adding courses
+
+There is no free public source for Swedish course scorecards — SGF's GIT is
+the only system with the data and its API is a paid commercial licence — so
+the library is a plain file you own:
+
+```json
+{ "name": "Bro Hof – Stadium", "pars": [4,4,5,3,4,4,3,5,4,4,4,3,5,4,4,3,4,5] }
+```
+
+Add entries to `courses.json`, push, done. Pars for the bundled courses come
+from memory and should be checked against the real scorecard.
+
+Faster for a one-off: in **Inställningar**, paste the 18 pars into "Klistra in
+par från scorekortet", then "Spara som egen bana". That stores it in the
+shared state for everyone, without a deploy.
+
 ## Resetting between events
 
 Either use **Nollställ alla resultat** in the app, or wipe the blob entirely:
@@ -69,4 +87,4 @@ That is usually fine for a four-player company outing on an unguessable site
 name. To lock it down, Netlify's password protection (site-wide, paid plans)
 is the least intrusive option; otherwise put a shared secret in an
 `x-aqopen-key` header and check it against a Netlify environment variable in
-`netlify/functions/state.mjs`.
+`state.mjs`.
