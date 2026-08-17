@@ -276,10 +276,11 @@
   function setStatus(txt, strong){
     document.getElementById('status').innerHTML = strong ? '<b>'+txt+'</b>' : txt;
   }
+  let lastError = '';
   function syncedNote(){
-    return offline
-            ? 'Offline · sparat på den här telefonen, skickas upp när nätet är tillbaka'
-            : 'Sparat · alla som öppnar sidan ser samma resultat';
+    if(!offline) return 'Sparat · alla som öppnar sidan ser samma resultat';
+    return 'Servern svarar inte'+(lastError?' ('+lastError+')':'')+
+            ' · sparat på den här telefonen så länge';
   }
 
   /* Three-way merge: a value the user changed locally wins, otherwise the
@@ -323,6 +324,7 @@
   async function pull(){
     const r = await fetch(API, {cache:'no-store'});
     if(!r.ok) throw new Error('GET '+r.status);
+    lastError = '';
     return r.json();                        // {rev, state}
   }
   async function push(){
@@ -353,7 +355,7 @@
       setStatus(syncedNote());
       render();
     }catch(e){
-      offline = true;
+      offline = true; lastError = e.message;
       setStatus(syncedNote());
     }finally{
       inFlight = false;
@@ -378,7 +380,7 @@
         if(changed) render();
       }
     }catch(e){
-      if(!offline){ offline = true; setStatus(syncedNote()); }
+      if(!offline){ offline = true; lastError = e.message; setStatus(syncedNote()); }
     }
   }
 
@@ -398,7 +400,7 @@
       if(!doc.state) queueSave();           // first ever load: seed the server
       setStatus(syncedNote());
     }catch(e){
-      offline = true;
+      offline = true; lastError = e.message;
       setStatus(syncedNote());
     }
     render();

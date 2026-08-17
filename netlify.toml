@@ -3,7 +3,15 @@
   functions = "netlify/functions"
 
 # No build step: index.html is the whole front end.
-# The scorecard API lives at /api/state, routed by config.path in the function.
+
+# The function declares its own route via `export const config = { path }`.
+# This redirect is a fallback for the case where that route isn't registered,
+# so /api/state resolves either way.
+[[redirects]]
+  from = "/api/state"
+  to = "/.netlify/functions/state"
+  status = 200
+  force = false
 
 [[headers]]
   for = "/index.html"
