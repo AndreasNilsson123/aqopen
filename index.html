@@ -781,7 +781,7 @@
       if(b.complete && s.complete) r.delta = s.sum - b.sum;
       r.hcpBana = handicapRoundBonus(p, 'bana', b);
       r.hcpSim = handicapRoundBonus(p, 'sim', s);
-      r.hcpEvent = handicapEventBonus(p, stats);
+      r.hcpEvent = handicapEventBonus(p, {bana:b, sim:s});
       r.hcp = r.hcpBana + r.hcpSim + r.hcpEvent;
     });
 
