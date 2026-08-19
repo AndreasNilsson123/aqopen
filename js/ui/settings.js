@@ -4,7 +4,7 @@
  * Settings are organised into collapsible <details> panels so users can focus
  * on the section they need without being overwhelmed by the full flat list.
  */
-import { HOLES, ROUND_IDS, ROUND_LABELS } from '../constants.js';
+import { HOLES, ROUND_IDS, ROUND_LABELS, TIEBREAK_OPTIONS } from '../constants.js';
 import { clamp, num, fmt, el, esc, clone } from '../utils.js';
 import { makePlayer, presetConfig, fixHoleChoicesState, migrateState } from '../state.js';
 import {
@@ -13,7 +13,7 @@ import {
 } from '../store.js';
 import {
   gm, ruleEnabled, ruleCfg, gamemodeLines, stablefordSummary,
-  handicapModeLabel, handicapAppliesLabel
+  handicapModeLabel, handicapAppliesLabel, tiebreakLabel
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
@@ -187,6 +187,30 @@ function buildBackupSection(box) {
     };
     body.appendChild(exportCard);
 
+    // Archive to history
+    if (canEdit()) {
+      const archiveCard = el(
+        '<div class="subcard">' +
+          '<h4>Arkivera tävlingen</h4>' +
+          '<p>Sparar en kopia av hela tävlingen i historiken (nås via Historik-fliken) utan att påverka pågående tävling.</p>' +
+          '<button class="btn ghost">Arkivera nu</button>' +
+          '<p class="empty-note archive-msg" style="margin:8px 0 0"></p>' +
+        '</div>'
+      );
+      const archiveMsg = archiveCard.querySelector('.archive-msg');
+      archiveCard.querySelector('button').onclick = async () => {
+        archiveMsg.textContent = 'Arkiverar…';
+        try {
+          const { archiveEvent } = await import('../app.js');
+          await archiveEvent(store.local.editKey);
+          archiveMsg.textContent = '✓ Tävlingen är arkiverad och syns nu under Historik.';
+        } catch (e) {
+          archiveMsg.textContent = 'Fel: ' + e.message;
+        }
+      };
+      body.appendChild(archiveCard);
+    }
+
     if (!canEdit()) {
       body.appendChild(el('<p class="notice" style="margin:12px 0 0">Import och återställning visas först när den här enheten är i redigeringsläge.</p>'));
       return;
@@ -288,6 +312,19 @@ function buildFormatSection(box) {
     nameInput.onblur    = () => { touchGamemode(); store.S.gamemode.name = nameInput.value.trim() || 'Eget upplägg'; save(); rerender(); };
     nameInput.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
     body.appendChild(nameRow);
+
+    // Tiebreak
+    const tbRow = el('<div class="field"><label>Playoff</label><select></select></div>');
+    const tbSel = tbRow.querySelector('select');
+    TIEBREAK_OPTIONS.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.value; o.textContent = opt.label;
+      if ((store.S.gamemode.tiebreak || 'none') === opt.value) o.selected = true;
+      tbSel.appendChild(o);
+    });
+    tbSel.onchange = () => { touchGamemode(); store.S.gamemode.tiebreak = tbSel.value; save(); rerender(); };
+    body.appendChild(tbRow);
+    body.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Playoff avgör lika total poäng automatiskt (utom sudden death som markeras manuellt).</p>'));
 
     body.appendChild(el(
       '<div class="subcard"><h4>Aktiva regler</h4>' +
@@ -463,7 +500,12 @@ function buildRoundSection(rid, box) {
     body.appendChild(applyRow);
     if (R.courseName) body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">Vald bana: ' + esc(R.courseName) + '</p>'));
     const chosen = list[+sel.value];
-    if (chosen && chosen.note) body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">' + esc(chosen.note) + '</p>'));
+    if (chosen && chosen.note)     body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">' + esc(chosen.note) + '</p>'));
+    if (chosen && chosen.location) body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">📍 ' + esc(chosen.location) + (chosen.website ? ' · <a href="' + esc(chosen.website) + '" target="_blank" rel="noopener">Webbplats</a>' : '') + '</p>'));
+    const ratingInfo = [];
+    if (chosen?.rating) ratingInfo.push('Bansläng: ' + chosen.rating);
+    if (chosen?.slope)  ratingInfo.push('Slope: '    + chosen.slope);
+    if (ratingInfo.length) body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">' + esc(ratingInfo.join(' · ')) + '</p>'));
 
     const paste = el(
       '<div class="subcard">' +
@@ -585,14 +627,145 @@ function buildResetSection(box) {
     btn.textContent = 'Tryck igen för att bekräfta';
     btn.onclick     = () => {
       saveResetBackup(clone(store.S));
-      store.S.strokes = { bana: {}, sim: {} };
-      store.S.ctpWins = { bana: {}, sim: {} };
-      store.S.ldWins  = { sim: {} };
-      store.S.live    = null;
+      store.S.strokes   = { bana: {}, sim: {} };
+      store.S.ctpWins   = { bana: {}, sim: {} };
+      store.S.ldWins    = { sim: {} };
+      store.S.live      = null;
+      store.S.snapshots = [];
       save(); rerender();
     };
   };
   box.appendChild(rc);
+}
+
+function buildTeamsSection(box) {
+  const teams   = store.S.teams || { enabled: false, groups: [], names: [] };
+  const preview = teams.enabled ? teams.groups.length + ' lag' : 'Av';
+
+  box.appendChild(section('Lagformat', preview, body => {
+    body.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Samla spelare i lag och se lagställning på resultattavlan.</p>'));
+
+    const enableRow = el('<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px"><strong>Lagformat</strong></div>');
+    const toggleBtn = el('<button class="chip blue" aria-pressed="' + !!teams.enabled + '">' + (teams.enabled ? 'På' : 'Av') + '</button>');
+    toggleBtn.onclick = () => {
+      if (!store.S.teams) store.S.teams = { enabled: false, groups: [], names: [], scoring: 'sum' };
+      store.S.teams.enabled = !store.S.teams.enabled;
+      save(); rerender();
+    };
+    enableRow.appendChild(toggleBtn);
+    body.appendChild(enableRow);
+
+    if (!teams.enabled) return;
+
+    // Scoring mode
+    const scoreRow = el('<div class="field"><label>Poäng</label><select><option value="sum">Summering</option><option value="bestball">Best-ball</option></select></div>');
+    const scoreSel = scoreRow.querySelector('select');
+    scoreSel.value    = teams.scoring || 'sum';
+    scoreSel.onchange = () => { store.S.teams.scoring = scoreSel.value; save(); rerender(); };
+    body.appendChild(scoreRow);
+
+    // Groups
+    body.appendChild(el('<h3 class="sec" style="margin-top:14px">Lag</h3>'));
+    (teams.groups || []).forEach((group, gi) => {
+      const nm = teams.names[gi] || 'Lag ' + (gi + 1);
+      const gc = el(
+        '<div class="subcard" style="margin-bottom:8px">' +
+          '<div class="field"><label>Lagnamn</label><input type="text" value="' + esc(nm) + '"></div>' +
+          '<div class="chips" id="tg' + gi + '"></div>' +
+          '<button class="btn danger" style="margin-top:8px;padding:6px 10px">Ta bort lag</button>' +
+        '</div>'
+      );
+      const nmInp = gc.querySelector('input');
+      nmInp.onblur = () => {
+        if (!store.S.teams.names) store.S.teams.names = [];
+        store.S.teams.names[gi] = nmInp.value.trim() || 'Lag ' + (gi + 1);
+        save(); rerender();
+      };
+      nmInp.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+
+      const chips = gc.querySelector('#tg' + gi);
+      store.S.players.forEach(p => {
+        const on = group.includes(p.id);
+        const c  = el('<button class="chip' + (on ? ' blue' : '') + '" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
+        c.onclick = () => {
+          const list = new Set(store.S.teams.groups[gi] || []);
+          list.has(p.id) ? list.delete(p.id) : list.add(p.id);
+          store.S.teams.groups[gi] = [...list];
+          save(); rerender();
+        };
+        chips.appendChild(c);
+      });
+
+      gc.querySelector('button.btn.danger').onclick = () => {
+        store.S.teams.groups.splice(gi, 1);
+        store.S.teams.names.splice(gi, 1);
+        save(); rerender();
+      };
+      body.appendChild(gc);
+    });
+
+    const addBtn = el('<button class="btn ghost">+ Lägg till lag</button>');
+    addBtn.onclick = () => {
+      if (!store.S.teams.groups) store.S.teams.groups = [];
+      if (!store.S.teams.names)  store.S.teams.names  = [];
+      store.S.teams.groups.push([]);
+      store.S.teams.names.push('Lag ' + (store.S.teams.groups.length));
+      save(); rerender();
+    };
+    body.appendChild(addBtn);
+  }));
+}
+
+function buildAuditSection(box) {
+  // Only show to editors.
+  if (!canEdit()) return;
+
+  box.appendChild(section('Ändringslogg', 'Vem ändrade vad', body => {
+    body.appendChild(el('<p class="empty-note" style="margin:0 0 10px">De senaste sparningarna på servern. Kräver redigeringsnyckel.</p>'));
+
+    const logArea = el('<div id="audit-list"><p class="empty-note">Laddar…</p></div>');
+    body.appendChild(logArea);
+
+    const loadBtn = el('<button class="btn ghost" style="margin-top:8px">Ladda logg</button>');
+    loadBtn.onclick = async () => {
+      loadBtn.disabled = true;
+      loadBtn.textContent = 'Laddar…';
+      try {
+        const headers = {};
+        if (store.local.editKey) headers['x-aqopen-key'] = store.local.editKey;
+        const r = await fetch('/api/audit?limit=50', { headers, cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+        const data = await r.json();
+        const entries = data.entries || [];
+        logArea.innerHTML = '';
+        if (!entries.length) {
+          logArea.innerHTML = '<p class="empty-note">Inga poster i loggen ännu.</p>';
+        } else {
+          const t = document.createElement('table');
+          t.className = 'stat-table';
+          t.innerHTML = '<thead><tr><th>Tid</th><th>Rev</th><th>Ändrade nycklar</th><th>Anropare</th></tr></thead>';
+          const tb = document.createElement('tbody');
+          entries.forEach(e => {
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+              '<td class="stat-lbl">' + esc(new Date(e.at).toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'numeric' })) + '</td>' +
+              '<td class="stat-val">' + esc(String(e.rev)) + '</td>' +
+              '<td class="stat-val" style="font-size:11px">' + esc((e.changedKeys || []).join(', ')) + '</td>' +
+              '<td class="stat-val" style="font-family:monospace;font-size:11px">' + esc(e.callerHash || '–') + '</td>';
+            tb.appendChild(tr);
+          });
+          t.appendChild(tb);
+          logArea.appendChild(t);
+          logArea.appendChild(el('<p class="empty-note" style="margin:8px 0 0">Totalt ' + data.total + ' poster (visar de 50 senaste).</p>'));
+        }
+      } catch (e) {
+        logArea.innerHTML = '<p class="empty-note" style="color:var(--warn)">Kunde inte ladda loggen: ' + esc(e.message) + '</p>';
+      }
+      loadBtn.textContent = 'Uppdatera logg';
+      loadBtn.disabled = false;
+    };
+    body.appendChild(loadBtn);
+  }));
 }
 
 /* ====================================================================== */
@@ -614,8 +787,10 @@ export function renderConfig() {
   buildBonusSection(box);
   buildHandicapSection(box);
   buildPlayersSection(box);
+  buildTeamsSection(box);
   ROUND_IDS.forEach(rid => buildRoundSection(rid, box));
   buildResetSection(box);
+  buildAuditSection(box);
 
   return box;
 }

@@ -1,4 +1,4 @@
-import { HOLES, SCHEMA_VERSION, ROUND_IDS, PRESET_LIBRARY } from './constants.js';
+import { HOLES, SCHEMA_VERSION, ROUND_IDS, PRESET_LIBRARY, TIEBREAK_OPTIONS } from './constants.js';
 import { clone, uid, clamp, num } from './utils.js';
 
 export function makePlayer(name) {
@@ -25,7 +25,9 @@ export function defaultState() {
     customCourses: [],
     strokes:  { bana: {}, sim: {} },
     ctpWins:  { bana: {}, sim: {} },
-    ldWins:   { sim: {} }
+    ldWins:   { sim: {} },
+    teams:     { enabled: false, groups: [], names: [] },
+    snapshots: []
   };
 }
 
@@ -74,6 +76,8 @@ export function sanitizeWinnerMap(map, players) {
   return out;
 }
 
+const VALID_TIEBREAKS = new Set(TIEBREAK_OPTIONS.map(o => o.value));
+
 export function normalizeGamemode(raw) {
   const src      = raw && typeof raw === 'object' ? raw : {};
   const presetId = typeof src.presetId === 'string' && PRESET_LIBRARY[src.presetId] ? src.presetId : 'aqopen';
@@ -110,6 +114,8 @@ export function normalizeGamemode(raw) {
     appliesTo
   };
 
+  gm.tiebreak = VALID_TIEBREAKS.has(src.tiebreak) ? src.tiebreak : 'none';
+
   if (src.presetId === 'custom' || !PRESET_LIBRARY[src.presetId]) gm.presetId = 'custom';
   return gm;
 }
@@ -118,7 +124,49 @@ export function sanitizeCourses(courses) {
   if (!Array.isArray(courses)) return [];
   return courses
     .filter(c => c && typeof c.name === 'string' && c.name.trim() && Array.isArray(c.pars) && c.pars.length === HOLES)
-    .map(c => ({ name: c.name.trim(), pars: c.pars.map(v => clamp(num(v, 4), 3, 6)) }));
+    .map(c => {
+      const out = {
+        name: c.name.trim(),
+        pars: c.pars.map(v => clamp(num(v, 4), 3, 6))
+      };
+      // Preserve optional rich metadata.
+      if (typeof c.slope    === 'number') out.slope    = clamp(c.slope, 55, 155);
+      if (typeof c.rating   === 'number') out.rating   = c.rating;
+      if (typeof c.location === 'string') out.location = c.location.slice(0, 120);
+      if (typeof c.website  === 'string') out.website  = c.website.slice(0, 200);
+      if (Array.isArray(c.holeNames) && c.holeNames.length === HOLES) {
+        out.holeNames = c.holeNames.map(n => String(n || '').slice(0, 40));
+      }
+      if (Array.isArray(c.strokeIndex) && c.strokeIndex.length === HOLES) {
+        out.strokeIndex = c.strokeIndex.map(v => clamp(parseInt(v, 10) || 1, 1, HOLES));
+      }
+      if (typeof c.note === 'string') out.note = c.note.slice(0, 200);
+      if (c.own) out.own = true;
+      return out;
+    });
+}
+
+export function sanitizeTeams(teams, players) {
+  const validIds = new Set(players.map(p => p.id));
+  if (!teams || typeof teams !== 'object' || !teams.enabled) {
+    return { enabled: false, groups: [], names: [], scoring: 'sum' };
+  }
+  const groups = Array.isArray(teams.groups)
+    ? teams.groups.map(g => (Array.isArray(g) ? g.filter(id => validIds.has(id)) : []))
+    : [];
+  const names = Array.isArray(teams.names)
+    ? teams.names.map(n => String(n || '').slice(0, 60))
+    : [];
+  const scoring = teams.scoring === 'bestball' ? 'bestball' : 'sum';
+  return { enabled: true, groups, names, scoring };
+}
+
+export function sanitizeSnapshots(snapshots) {
+  if (!Array.isArray(snapshots)) return [];
+  return snapshots
+    .filter(s => s && typeof s.hole === 'number' && typeof s.rid === 'string' && Array.isArray(s.rankings))
+    .slice(-200)
+    .map(s => ({ hole: s.hole, rid: s.rid, rankings: s.rankings.filter(id => typeof id === 'string') }));
 }
 
 export function fixHoleChoicesState(state, rid) {
@@ -166,7 +214,9 @@ export function migrateState(raw) {
     },
     ldWins: {
       sim: sanitizeWinnerMap(src.ldWins?.sim, players.length ? players : base.players)
-    }
+    },
+    teams:     sanitizeTeams(src.teams, players.length ? players : base.players),
+    snapshots: sanitizeSnapshots(src.snapshots)
   };
   fixHoleChoicesState(state, 'bana');
   fixHoleChoicesState(state, 'sim');

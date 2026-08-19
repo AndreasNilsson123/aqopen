@@ -5,7 +5,7 @@
  * the stroke array inside `store.S.strokes` the first time it is called for a
  * given player/round combination.
  */
-import { HOLES, ROUND_IDS, ROUND_LABELS } from './constants.js';
+import { HOLES, ROUND_IDS, ROUND_LABELS, TIEBREAK_OPTIONS } from './constants.js';
 import { clamp, num, fmt } from './utils.js';
 import { presetConfig } from './state.js';
 import { store } from './store.js';
@@ -38,6 +38,10 @@ export function handicapAppliesLabel(appliesTo) {
 
 export function rulePrizeLabel(key) {
   return ({ ctp: 'Closest to pin', ld: 'Längsta drive', clean: 'Ren rond', comeback: 'Comeback' }[key] || key);
+}
+
+export function tiebreakLabel(value) {
+  return TIEBREAK_OPTIONS.find(o => o.value === value)?.label || 'Ingen';
 }
 
 export function stablefordSummary(mode = gm()) {
@@ -82,6 +86,12 @@ export function gamemodeLines(mode = gm()) {
   } else {
     lines.push('Handicap: avstängt.');
   }
+
+  const tb = mode.tiebreak || 'none';
+  if (tb !== 'none') {
+    lines.push('Playoff: ' + tiebreakLabel(tb) + '.');
+  }
+
   return lines;
 }
 
@@ -165,7 +175,241 @@ export function handicapEventBonus(player, roundStats) {
   return basePoints * cfg.pointValue;
 }
 
-/* ---------- full event compute ---------- */
+/* ---------- tiebreak ---------- */
+
+/**
+ * Compute a secondary sort score for tiebreaking.
+ * Higher = better (consistent with total score direction).
+ */
+export function tiebreakScore(pid, tbMode) {
+  if (!tbMode || tbMode === 'none' || tbMode === 'suddenDeath') return 0;
+  // Tiebreak on the combined points from the last N holes of simulator (the
+  // "back" round), falling back to bana if sim is incomplete.
+  const holeMap = { back9: 9, last6: 6, last3: 3, last1: 1 };
+  const count   = holeMap[tbMode] || 0;
+  if (!count) return 0;
+
+  let score = 0;
+  ROUND_IDS.forEach(rid => {
+    const a    = arr(rid, pid);
+    const pars = store.S.rounds[rid].pars;
+    for (let i = HOLES - count; i < HOLES; i++) {
+      const pts = holePoints(a[i], pars[i]);
+      if (pts != null) score += pts;
+    }
+  });
+  return score;
+}
+
+/* ---------- per-player stats ---------- */
+
+export function playerStats(pid) {
+  const stats = {
+    bana: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0, triples: 0, avg: null, best: null, worst: null },
+    sim:  { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0, triples: 0, avg: null, best: null, worst: null }
+  };
+  ROUND_IDS.forEach(rid => {
+    const a    = arr(rid, pid);
+    const pars = store.S.rounds[rid].pars;
+    const st   = stats[rid];
+    let filled = 0, strokeSum = 0;
+    for (let i = 0; i < HOLES; i++) {
+      if (a[i] == null) continue;
+      filled++;
+      strokeSum += a[i];
+      if (st.best === null || a[i] - pars[i] < st.best) st.best = a[i] - pars[i];
+      if (st.worst === null || a[i] - pars[i] > st.worst) st.worst = a[i] - pars[i];
+      const d = a[i] - pars[i];
+      if (d <= -2) st.eagles++;
+      else if (d === -1) st.birdies++;
+      else if (d === 0)  st.pars++;
+      else if (d === 1)  st.bogeys++;
+      else if (d === 2)  st.doubles++;
+      else               st.triples++;
+    }
+    if (filled) st.avg = strokeSum / filled;
+    st.filled = filled;
+  });
+  return stats;
+}
+
+/* ---------- snapshot helpers ---------- */
+
+/**
+ * Record a leaderboard position snapshot after a stroke is entered.
+ * Prunes the array to at most 200 entries.
+ */
+export function recordSnapshot(rid, hole, res) {
+  if (!store.S.snapshots) store.S.snapshots = [];
+  const rankings = [...store.S.players]
+    .sort((a, b) => res[b.id].total - res[a.id].total)
+    .map(p => p.id);
+  store.S.snapshots.push({ hole, rid, rankings });
+  if (store.S.snapshots.length > 200) store.S.snapshots.splice(0, store.S.snapshots.length - 200);
+}
+
+/* ---------- team scoring ---------- */
+
+export function computeTeams(res) {
+  const teams = store.S.teams;
+  if (!teams?.enabled || !Array.isArray(teams.groups)) return [];
+  const mode = teams.scoring === 'bestball' ? 'bestball' : 'sum';
+
+  return teams.groups.map((group, i) => {
+    const members = group.map(pid => store.S.players.find(p => p.id === pid)).filter(Boolean);
+    let total = 0;
+    if (mode === 'sum') {
+      members.forEach(p => { total += res[p.id]?.total || 0; });
+    } else {
+      // Best-ball: take the highest individual total.
+      total = members.reduce((best, p) => Math.max(best, res[p.id]?.total || 0), 0);
+    }
+    return {
+      name:    teams.names[i] || ('Lag ' + (i + 1)),
+      members: members.map(p => p.name),
+      total,
+      mode
+    };
+  });
+}
+
+/* ---------- compute for an arbitrary state snapshot ---------- */
+
+/**
+ * Compute standings for an archived (or any explicit) state without
+ * mutating the global store.S.  All helper functions that normally read
+ * store.S are duplicated here with an explicit state parameter.
+ */
+export function computeFromRaw(state) {
+  const mode = state.gamemode || presetConfig('aqopen');
+  const gms  = () => mode;
+
+  function _holePoints(strokes, par) {
+    if (strokes == null) return null;
+    const d = strokes - par;
+    if (d <= -2) return mode.stableford.eaglePlus;
+    if (d === -1) return mode.stableford.birdie;
+    if (d === 0)  return mode.stableford.par;
+    if (d === 1)  return mode.stableford.bogey;
+    if (d === 2)  return mode.stableford.double;
+    return mode.stableford.triple;
+  }
+
+  function _arr(rid, pid) {
+    const bucket = state.strokes[rid] || {};
+    const src    = Array.isArray(bucket[pid]) ? bucket[pid] : [];
+    return Array.from({ length: HOLES }, (_, i) => {
+      const v = src[i];
+      return v != null && Number.isFinite(+v) ? +v : null;
+    });
+  }
+
+  function _roundStable(rid, pid) {
+    const a    = _arr(rid, pid);
+    const pars = state.rounds[rid].pars;
+    let sum = 0, filled = 0, clean = true;
+    for (let i = 0; i < HOLES; i++) {
+      if (a[i] == null) continue;
+      filled++;
+      sum += _holePoints(a[i], pars[i]) ?? 0;
+      if (a[i] - pars[i] >= 3) clean = false;
+    }
+    return { sum, filled, complete: filled === HOLES, clean };
+  }
+
+  function _ruleEnabled(key, rid) {
+    const rule = mode.bonuses[key];
+    if (!rule || !rule.enabled) return false;
+    if (rid == null) return true;
+    if (!rule.rounds) return true;
+    return !!rule.rounds[rid];
+  }
+
+  function _handicapRoundBonus(player, rid, stats) {
+    const cfg = mode.handicap;
+    if (cfg.mode === 'none') return 0;
+    if (cfg.appliesTo === 'event') return 0;
+    if (cfg.appliesTo !== 'both' && cfg.appliesTo !== rid) return 0;
+    if (!stats?.filled) return 0;
+    const hcp = clamp(num(player?.handicap, 0), -36, 54);
+    if (!hcp) return 0;
+    const base = cfg.mode === 'flat' ? hcp : hcp * (cfg.allowance / 100);
+    return base * cfg.pointValue;
+  }
+
+  function _handicapEventBonus(player, roundStats) {
+    const cfg = mode.handicap;
+    if (cfg.mode === 'none' || cfg.appliesTo !== 'event') return 0;
+    const totalFilled = ROUND_IDS.reduce((n, rid) => n + (roundStats[rid]?.filled || 0), 0);
+    if (!totalFilled) return 0;
+    const hcp = clamp(num(player?.handicap, 0), -36, 54);
+    if (!hcp) return 0;
+    const base = cfg.mode === 'flat' ? hcp : hcp * (cfg.allowance / 100);
+    return base * cfg.pointValue;
+  }
+
+  const res   = {};
+  const stats = { bana: {}, sim: {} };
+
+  state.players.forEach(p => {
+    stats.bana[p.id] = _roundStable('bana', p.id);
+    stats.sim[p.id]  = _roundStable('sim',  p.id);
+    res[p.id] = {
+      stableBana: stats.bana[p.id].sum,
+      stableSim:  stats.sim[p.id].sum,
+      ctp: 0, ld: 0, tri: 0, cb: 0,
+      hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
+      cleanBana: false, cleanSim: false, delta: null, badges: [], tb: 0
+    };
+  });
+
+  state.players.forEach(p => {
+    const b = stats.bana[p.id], s = stats.sim[p.id], r = res[p.id];
+    if (_ruleEnabled('clean', 'bana') && b.complete && b.clean) { r.tri += mode.bonuses.clean.points; r.cleanBana = true; }
+    if (_ruleEnabled('clean', 'sim')  && s.complete && s.clean) { r.tri += mode.bonuses.clean.points; r.cleanSim  = true; }
+    if (b.complete && s.complete) r.delta = s.sum - b.sum;
+    r.hcpBana  = _handicapRoundBonus(p, 'bana', b);
+    r.hcpSim   = _handicapRoundBonus(p, 'sim',  s);
+    r.hcpEvent = _handicapEventBonus(p, { bana: b, sim: s });
+    r.hcp      = r.hcpBana + r.hcpSim + r.hcpEvent;
+  });
+
+  if (_ruleEnabled('ctp')) {
+    ROUND_IDS.forEach(rid => {
+      if (!_ruleEnabled('ctp', rid)) return;
+      const wins = state.ctpWins?.[rid] || {};
+      Object.keys(wins).forEach(h => {
+        const add = splitPoints(wins[h], mode.bonuses.ctp.points);
+        Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ctp += add[pid]; });
+      });
+    });
+  }
+
+  if (_ruleEnabled('ld', 'sim')) {
+    const wins = state.ldWins?.sim || {};
+    Object.keys(wins).forEach(h => {
+      const add = splitPoints(wins[h], mode.bonuses.ld.points);
+      Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ld += add[pid]; });
+    });
+  }
+
+  if (_ruleEnabled('comeback')) {
+    const eligible = state.players.filter(p => res[p.id].delta != null && res[p.id].delta > 0);
+    if (eligible.length) {
+      const best    = Math.max(...eligible.map(p => res[p.id].delta));
+      const winners = eligible.filter(p => res[p.id].delta === best).map(p => p.id);
+      const add     = splitPoints(winners, mode.bonuses.comeback.points);
+      Object.keys(add).forEach(pid => { res[pid].cb += add[pid]; });
+    }
+  }
+
+  state.players.forEach(p => {
+    const r = res[p.id];
+    r.total = r.stableBana + r.stableSim + r.ctp + r.ld + r.tri + r.cb + r.hcp;
+  });
+
+  return res;
+}
 
 export function compute() {
   const res   = {};
@@ -179,7 +423,8 @@ export function compute() {
       stableSim:  stats.sim[p.id].sum,
       ctp: 0, ld: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
-      cleanBana: false, cleanSim: false, delta: null, badges: []
+      cleanBana: false, cleanSim: false, delta: null, badges: [],
+      tb: 0
     };
   });
 
@@ -237,6 +482,12 @@ export function compute() {
     res[p.id].total = res[p.id].stableBana + res[p.id].stableSim +
                       res[p.id].ctp + res[p.id].ld + res[p.id].tri +
                       res[p.id].cb + res[p.id].hcp;
+  });
+
+  // Compute tiebreak scores after totals are known.
+  const tbMode = gm().tiebreak || 'none';
+  store.S.players.forEach(p => {
+    res[p.id].tb = tiebreakScore(p.id, tbMode);
   });
 
   const comebackLead = Math.max(0, ...store.S.players.map(p => res[p.id].cb));

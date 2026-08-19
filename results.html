@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0B2545">
+  <title>AqOpen Sweden – Resultat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="icons/app.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    .results-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .results-actions .btn{font-size:13px;padding:9px 14px}
+    @media print{
+      .results-actions,.status{display:none!important}
+      .wrap{padding:0}
+      .card{break-inside:avoid}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="dots"></div><div class="slash"></div>
+      <div class="brand">Aq<span>Open</span></div>
+      <div class="brand-sub">SWEDEN</div>
+      <div class="brand-rule"></div>
+      <div class="brand-note" id="brand-note">Resultat</div>
+    </header>
+
+    <div class="results-actions">
+      <a href="index.html" class="btn ghost">← Tillbaka till appen</a>
+      <button class="btn ghost" id="copy-btn">Kopiera länk</button>
+      <button class="btn ghost" id="print-btn">Skriv ut / Spara PDF</button>
+    </div>
+
+    <main id="view"><p class="empty-note" style="text-align:center;padding:40px 0">Laddar resultat…</p></main>
+  </div>
+
+  <div class="status" id="status">Laddar…</div>
+
+  <script type="module">
+    import { migrateState } from './js/state.js';
+    import { store, setCourses } from './js/store.js';
+    import { compute, gamemodeLines, gm, ruleEnabled, roundStable, arr, holePoints } from './js/scoring.js';
+    import { fmt, el, esc } from './js/utils.js';
+    import { HOLES, ROUND_IDS } from './js/constants.js';
+
+    const status = document.getElementById('status');
+    const view   = document.getElementById('view');
+
+    function setStatus(t) { status.textContent = t; }
+
+    async function loadAndRender() {
+      // Load courses.
+      try {
+        const r = await fetch('courses.json', { cache: 'no-store' });
+        if (r.ok) {
+          const d = await r.json();
+          if (Array.isArray(d.courses)) setCourses(d.courses.filter(c => Array.isArray(c.pars) && c.pars.length === 18));
+        }
+      } catch (_) {}
+
+      // Load state from server.
+      try {
+        const r = await fetch('/api/state', { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const doc = await r.json();
+        if (doc.state) store.S = migrateState(doc.state);
+        setStatus('Senast uppdaterat' + (doc.updated ? ' ' + new Date(doc.updated).toLocaleString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : ''));
+      } catch (e) {
+        setStatus('Kunde inte ladda från server: ' + e.message);
+      }
+
+      render();
+    }
+
+    function render() {
+      document.title = (store.S.event || 'AqOpen Sweden') + ' – Resultat';
+      document.getElementById('brand-note').textContent = store.S.event || 'Resultat';
+
+      const res    = compute();
+      const sorted = [...store.S.players].sort((a, b) => {
+        const dt = (res[b.id]?.total ?? 0) - (res[a.id]?.total ?? 0);
+        if (dt !== 0) return dt;
+        return (res[b.id]?.tb ?? 0) - (res[a.id]?.tb ?? 0);
+      });
+      const max = Math.max(1, ...store.S.players.map(p => res[p.id].total));
+
+      view.innerHTML = '';
+
+      // Summary card.
+      const doneHoles = store.S.players.reduce((s, p) =>
+        s + roundStable('bana', p.id).filled + roundStable('sim', p.id).filled, 0);
+      const totalHoles = store.S.players.length * ROUND_IDS.length * 18;
+      view.appendChild(el(
+        '<section class="card"><div class="card-head light">Totalt</div><div class="card-body">' +
+          '<div class="legend" style="margin-top:0">' +
+            '<span><b>' + store.S.players.length + '</b> spelare</span>' +
+            '<span><b>' + doneHoles + '/' + Math.max(totalHoles, 1) + '</b> hål registrerade</span>' +
+          '</div>' +
+        '</div></section>'
+      ));
+
+      // Leader.
+      if (sorted.length && res[sorted[0].id].total > 0) {
+        const leader    = sorted[0];
+        const leadScore = res[leader.id].total;
+        const edge      = sorted[1] ? leadScore - res[sorted[1].id].total : leadScore;
+        view.appendChild(el(
+          '<section class="card"><div class="card-body">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">' +
+              '<div>' +
+                '<div style="font-family:\'Barlow Condensed\',sans-serif;letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--muted)">Ledarboll</div>' +
+                '<div style="font-size:24px;font-weight:700;color:var(--navy);margin-top:2px">' + esc(leader.name) + '</div>' +
+                '<div class="empty-note" style="margin-top:4px">' + esc(gm().name) + ' · ' + (edge > 0 ? 'leder med ' + fmt(edge) + ' p' : 'delad ledning') + '</div>' +
+              '</div>' +
+              '<div class="tag" style="padding:5px 8px;font-size:11px">' + fmt(leadScore) + ' p</div>' +
+            '</div>' +
+          '</div></section>'
+        ));
+      }
+
+      // Standings.
+      const card = el(
+        '<section class="card">' +
+          '<div class="card-head">Totalställning' +
+            '<span style="font-family:Inter;letter-spacing:0;text-transform:none;font-size:12px;font-weight:400;opacity:.75">Flest poäng vinner</span>' +
+          '</div>' +
+          '<div class="card-body" id="lbb"></div>' +
+        '</section>'
+      );
+      const body = card.querySelector('#lbb');
+      if (!sorted.length) {
+        body.appendChild(el('<p class="empty-note">Inga spelare inlagda.</p>'));
+      }
+
+      sorted.forEach((p, i) => {
+        const r        = res[p.id];
+        const banaFil  = roundStable('bana', p.id).filled;
+        const simFil   = roundStable('sim',  p.id).filled;
+        const seg = (cls, val) => val > 0 ? '<i class="' + cls + '" style="width:' + (val / max * 100) + '%"></i>' : '';
+
+        body.appendChild(el(
+          '<div class="lb-row' + (i === 0 && r.total > 0 ? ' lead' : '') + '">' +
+            '<div class="rank">' + (i + 1) + '</div>' +
+            '<div class="lb-main">' +
+              '<div class="lb-top">' +
+                '<div class="lb-name">' + esc(p.name) + '</div>' +
+                '<div class="lb-pts">' + fmt(r.total) + '<small>p</small></div>' +
+              '</div>' +
+              '<div class="bar">' +
+                seg('s-stable', r.stableBana + r.stableSim) +
+                seg('s-ctp', r.ctp) + seg('s-ld', r.ld) +
+                seg('s-tri', r.tri) + seg('s-cb', r.cb) +
+                seg('s-hcp', r.hcp) +
+              '</div>' +
+              '<div class="lb-break">' +
+                '<span>Klart <b>' + (banaFil + simFil) + '/36</b></span>' +
+                '<span>Bana <b>' + fmt(r.stableBana) + '</b></span>' +
+                '<span>Sim <b>'  + fmt(r.stableSim)  + '</b></span>' +
+                '<span>CTP <b>'  + fmt(r.ctp)         + '</b></span>' +
+                '<span>Drive <b>'+ fmt(r.ld)           + '</b></span>' +
+                '<span>Bonus <b>'+ fmt(r.tri + r.cb)   + '</b></span>' +
+                '<span>HCP <b>'  + fmt(r.hcp)          + '</b></span>' +
+              '</div>' +
+            '</div>' +
+          '</div>'
+        ));
+      });
+
+      body.appendChild(el(
+        '<div class="legend" style="margin-top:14px">' +
+          '<span><i class="swatch s-stable"></i>Stableford</span>' +
+          '<span><i class="swatch s-ctp"></i>CTP</span>' +
+          '<span><i class="swatch s-ld"></i>Drive</span>' +
+          '<span><i class="swatch s-tri"></i>Bonusar</span>' +
+          '<span><i class="swatch s-cb"></i>Comeback</span>' +
+          '<span><i class="swatch s-hcp"></i>Handicap</span>' +
+        '</div>'
+      ));
+      view.appendChild(card);
+
+      // Rules.
+      view.appendChild(el(
+        '<section class="card">' +
+          '<div class="card-head light">Spelformat</div>' +
+          '<div class="card-body"><ul class="rules" style="margin:0;padding-left:18px">' +
+            gamemodeLines().map(line => '<li>' + esc(line) + '</li>').join('') +
+          '</ul></div>' +
+        '</section>'
+      ));
+    }
+
+    // Action buttons.
+    document.getElementById('copy-btn').onclick = () => {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        document.getElementById('copy-btn').textContent = '✓ Kopierat!';
+        setTimeout(() => { document.getElementById('copy-btn').textContent = 'Kopiera länk'; }, 2000);
+      });
+    };
+    document.getElementById('print-btn').onclick = () => window.print();
+
+    loadAndRender();
+  </script>
+</body>
+</html>
