@@ -6,7 +6,7 @@ import { fmt, el, esc } from '../utils.js';
 import { canEdit, store, allCourses } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus
+  handicapRoundBonus, compute, recordSnapshot
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -111,11 +111,9 @@ export function renderRound(rid) {
       const input         = tr.querySelector('.strokes');
       const setVal        = nv => {
         a[i] = nv;
-        // Record a leaderboard snapshot.
-        import('../scoring.js').then(m => {
-          const res = m.compute();
-          m.recordSnapshot(rid, i + 1, res);
-        });
+        // Record a leaderboard snapshot synchronously before saving.
+        const res = compute();
+        recordSnapshot(rid, i + 1, res);
         save(); rerender();
       };
 

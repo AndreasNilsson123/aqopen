@@ -38,8 +38,8 @@ export function renderStandings(players, res, opts = {}) {
 
   sorted.forEach((p, i) => {
     const r   = res[p.id] || {};
-    const banaStats = r.stableBana != null ? { filled: (r.stableBana ? HOLES : 0) } : { filled: 0 };
-    const simStats  = r.stableSim  != null ? { filled: (r.stableSim  ? HOLES : 0) } : { filled: 0 };
+    const banaStats = r.stableBana != null ? { filled: HOLES } : { filled: 0 };
+    const simStats  = r.stableSim  != null ? { filled: HOLES } : { filled: 0 };
     // Get actual filled counts if available.
     try {
       const bs = roundStable('bana', p.id);

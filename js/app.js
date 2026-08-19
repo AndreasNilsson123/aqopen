@@ -161,12 +161,10 @@ function renderHistoryTab(view) {
       if (!full) return;
       // Compute standings from archived state without touching live store.S.
       const { migrateState } = await import('./state.js');
-      const { compute: computeArchived } = await import('./scoring.js');
-      const realS = store.S;
-      store.S = migrateState(full.state || {});
-      const res     = computeArchived();
-      const players = store.S.players;
-      store.S = realS;
+      const { computeFromRaw } = await import('./scoring.js');
+      const archivedState = migrateState(full.state || {});
+      const res     = computeFromRaw(archivedState);
+      const players = archivedState.players;
       viewingArchived = { event: full, players, res, index: idx };
       render();
     });

@@ -114,7 +114,7 @@ export function normalizeGamemode(raw) {
     appliesTo
   };
 
-  gm.tiebreak = VALID_TIEBREAKS.has(src.tiebreak) ? src.tiebreak : (gm.tiebreak || 'none');
+  gm.tiebreak = VALID_TIEBREAKS.has(src.tiebreak) ? src.tiebreak : 'none';
 
   if (src.presetId === 'custom' || !PRESET_LIBRARY[src.presetId]) gm.presetId = 'custom';
   return gm;
