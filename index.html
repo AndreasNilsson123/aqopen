@@ -1330,11 +1330,11 @@
     ];
     bonusDefs.forEach(([key,label,field,rounds])=>{
       const rule = S.gamemode.bonuses[key];
-      const card = el('<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><strong style="font-size:14px">'+label+'</strong><button class="chip blue" aria-pressed="'+rule.enabled+'">'+(rule.enabled?'På':'Av')+'</button></div><div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="'+rule.points+'"></div><div class="chips" id="rounds"></div></div>');
+      const card = el('<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><strong style="font-size:14px">'+label+'</strong><button class="chip blue" aria-pressed="'+rule.enabled+'">'+(rule.enabled?'På':'Av')+'</button></div><div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="'+rule.points+'"></div><div class="chips bonus-rounds"></div></div>');
       const toggle = card.querySelector('button');
       toggle.onclick = ()=>{ touchGamemode(); rule.enabled = !rule.enabled; save(); render(); };
       card.querySelector('input').onchange = e=>{ touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); render(); };
-      const chips = card.querySelector('#rounds');
+      const chips = card.querySelector('.bonus-rounds');
       if(rounds.length){
         rounds.forEach(rid=>{
           const chip = el('<button class="chip" aria-pressed="'+rule.rounds[rid]+'">'+ROUND_LABELS[rid]+'</button>');
