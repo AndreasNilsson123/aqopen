@@ -1,7 +1,16 @@
 export const HOLES = 18;
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const ROUND_IDS = ['bana', 'sim'];
 export const ROUND_LABELS = { bana: 'Bana (ute)', sim: 'Simulator' };
+
+export const TIEBREAK_OPTIONS = [
+  { value: 'none',        label: 'Ingen' },
+  { value: 'back9',       label: 'Sista 9 hålen' },
+  { value: 'last6',       label: 'Sista 6 hålen' },
+  { value: 'last3',       label: 'Sista 3 hålen' },
+  { value: 'last1',       label: 'Sista hålet' },
+  { value: 'suddenDeath', label: 'Sudden death (markera manuellt)' },
+];
 
 export const PRESET_LIBRARY = {
   aqopen: {
@@ -14,7 +23,8 @@ export const PRESET_LIBRARY = {
       clean:    { enabled: true,  points: 5,  rounds: { bana: true,  sim: true  } },
       comeback: { enabled: true,  points: 10 }
     },
-    handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' }
+    handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' },
+    tiebreak: 'none'
   },
   stableford: {
     presetId: 'stableford',
@@ -26,7 +36,8 @@ export const PRESET_LIBRARY = {
       clean:    { enabled: false, points: 3, rounds: { bana: true,  sim: true  } },
       comeback: { enabled: false, points: 5 }
     },
-    handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' }
+    handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' },
+    tiebreak: 'none'
   }
 };
 

@@ -3,7 +3,7 @@
  */
 import { HOLES } from '../constants.js';
 import { fmt, el, esc } from '../utils.js';
-import { canEdit, store } from '../store.js';
+import { canEdit, store, allCourses } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
   handicapRoundBonus
@@ -68,6 +68,11 @@ export function renderRound(rid) {
   );
   const tb = sc.querySelector('#tb');
   const a  = arr(rid, pid);
+
+  // Resolve rich course metadata (hole names, stroke index) if available.
+  const richCourse  = allCourses().find(c => c.name === R.courseName) || null;
+  const holeNames   = richCourse?.holeNames   || [];
+  const strokeIndex = richCourse?.strokeIndex  || [];
   let strokeSum = 0;
 
   for (let i = 0; i < HOLES; i++) {
@@ -76,9 +81,12 @@ export function renderRound(rid) {
     const pts   = holePoints(v, par);
     const lab   = holeLabel(v, par);
     const isTri = v != null && (v - par) >= 3;
+    const hn    = holeNames[i]   ? '<span style="font-size:10px;color:var(--muted);display:block;line-height:1.2">' + esc(holeNames[i]) + '</span>' : '';
+    const si    = strokeIndex[i] ? '<span class="tag" style="background:#F0F4F8;color:var(--muted)">SI ' + strokeIndex[i] + '</span>' : '';
     const tags  =
       (ruleEnabled('ctp', rid) && R.ctp.includes(i + 1) ? '<span class="tag">CTP</span>' : '') +
-      (ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(i + 1) ? '<span class="tag">LD</span>' : '');
+      (ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(i + 1) ? '<span class="tag">LD</span>' : '') +
+      si;
 
     const scoreCell = canEdit()
       ? '<div class="stepper">' +
@@ -90,7 +98,7 @@ export function renderRound(rid) {
 
     const tr = el(
       '<tr' + (v != null ? ' class="done"' : '') + '>' +
-        '<td class="hno">' + (i + 1) + '</td>' +
+        '<td class="hno">' + (i + 1) + hn + '</td>' +
         '<td class="par">Par ' + par + '</td>' +
         '<td class="tags">' + tags + '</td>' +
         '<td>' + scoreCell + '</td>' +
@@ -101,7 +109,15 @@ export function renderRound(rid) {
     if (canEdit()) {
       const [minus, plus] = tr.querySelectorAll('.stepper button');
       const input         = tr.querySelector('.strokes');
-      const setVal        = nv => { a[i] = nv; save(); rerender(); };
+      const setVal        = nv => {
+        a[i] = nv;
+        // Record a leaderboard snapshot.
+        import('../scoring.js').then(m => {
+          const res = m.compute();
+          m.recordSnapshot(rid, i + 1, res);
+        });
+        save(); rerender();
+      };
 
       minus.onclick   = () => setVal(a[i] == null ? par : Math.max(1, a[i] - 1));
       plus.onclick    = () => setVal(a[i] == null ? par : Math.min(20, a[i] + 1));

@@ -1,7 +1,8 @@
-const CACHE = 'aqopen-shell-v1';
+const CACHE = 'aqopen-shell-v2';
 const ASSETS = [
   './',
   './index.html',
+  './results.html',
   './manifest.webmanifest',
   './css/app.css',
   './courses.json',

@@ -13,7 +13,30 @@
   status = 200
   force = false
 
+[[redirects]]
+  from = "/api/history"
+  to = "/.netlify/functions/state"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/api/history/:id"
+  to = "/.netlify/functions/state"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/api/audit"
+  to = "/.netlify/functions/state"
+  status = 200
+  force = false
+
 [[headers]]
   for = "/index.html"
+  [headers.values]
+    cache-control = "no-cache"
+
+[[headers]]
+  for = "/results.html"
   [headers.values]
     cache-control = "no-cache"

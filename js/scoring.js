@@ -5,7 +5,7 @@
  * the stroke array inside `store.S.strokes` the first time it is called for a
  * given player/round combination.
  */
-import { HOLES, ROUND_IDS, ROUND_LABELS } from './constants.js';
+import { HOLES, ROUND_IDS, ROUND_LABELS, TIEBREAK_OPTIONS } from './constants.js';
 import { clamp, num, fmt } from './utils.js';
 import { presetConfig } from './state.js';
 import { store } from './store.js';
@@ -38,6 +38,10 @@ export function handicapAppliesLabel(appliesTo) {
 
 export function rulePrizeLabel(key) {
   return ({ ctp: 'Closest to pin', ld: 'Längsta drive', clean: 'Ren rond', comeback: 'Comeback' }[key] || key);
+}
+
+export function tiebreakLabel(value) {
+  return TIEBREAK_OPTIONS.find(o => o.value === value)?.label || 'Ingen';
 }
 
 export function stablefordSummary(mode = gm()) {
@@ -82,6 +86,12 @@ export function gamemodeLines(mode = gm()) {
   } else {
     lines.push('Handicap: avstängt.');
   }
+
+  const tb = mode.tiebreak || 'none';
+  if (tb !== 'none') {
+    lines.push('Playoff: ' + tiebreakLabel(tb) + '.');
+  }
+
   return lines;
 }
 
@@ -165,6 +175,104 @@ export function handicapEventBonus(player, roundStats) {
   return basePoints * cfg.pointValue;
 }
 
+/* ---------- tiebreak ---------- */
+
+/**
+ * Compute a secondary sort score for tiebreaking.
+ * Higher = better (consistent with total score direction).
+ */
+export function tiebreakScore(pid, tbMode) {
+  if (!tbMode || tbMode === 'none' || tbMode === 'suddenDeath') return 0;
+  // Tiebreak on the combined points from the last N holes of simulator (the
+  // "back" round), falling back to bana if sim is incomplete.
+  const holeMap = { back9: 9, last6: 6, last3: 3, last1: 1 };
+  const count   = holeMap[tbMode] || 0;
+  if (!count) return 0;
+
+  let score = 0;
+  ROUND_IDS.forEach(rid => {
+    const a    = arr(rid, pid);
+    const pars = store.S.rounds[rid].pars;
+    for (let i = HOLES - count; i < HOLES; i++) {
+      const pts = holePoints(a[i], pars[i]);
+      if (pts != null) score += pts;
+    }
+  });
+  return score;
+}
+
+/* ---------- per-player stats ---------- */
+
+export function playerStats(pid) {
+  const stats = {
+    bana: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0, triples: 0, avg: null, best: null, worst: null },
+    sim:  { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0, triples: 0, avg: null, best: null, worst: null }
+  };
+  ROUND_IDS.forEach(rid => {
+    const a    = arr(rid, pid);
+    const pars = store.S.rounds[rid].pars;
+    const st   = stats[rid];
+    let filled = 0, strokeSum = 0;
+    for (let i = 0; i < HOLES; i++) {
+      if (a[i] == null) continue;
+      filled++;
+      strokeSum += a[i];
+      if (st.best === null || a[i] - pars[i] < st.best) st.best = a[i] - pars[i];
+      if (st.worst === null || a[i] - pars[i] > st.worst) st.worst = a[i] - pars[i];
+      const d = a[i] - pars[i];
+      if (d <= -2) st.eagles++;
+      else if (d === -1) st.birdies++;
+      else if (d === 0)  st.pars++;
+      else if (d === 1)  st.bogeys++;
+      else if (d === 2)  st.doubles++;
+      else               st.triples++;
+    }
+    if (filled) st.avg = strokeSum / filled;
+    st.filled = filled;
+  });
+  return stats;
+}
+
+/* ---------- snapshot helpers ---------- */
+
+/**
+ * Record a leaderboard position snapshot after a stroke is entered.
+ * Prunes the array to at most 200 entries.
+ */
+export function recordSnapshot(rid, hole, res) {
+  if (!store.S.snapshots) store.S.snapshots = [];
+  const rankings = [...store.S.players]
+    .sort((a, b) => res[b.id].total - res[a.id].total)
+    .map(p => p.id);
+  store.S.snapshots.push({ hole, rid, rankings });
+  if (store.S.snapshots.length > 200) store.S.snapshots.splice(0, store.S.snapshots.length - 200);
+}
+
+/* ---------- team scoring ---------- */
+
+export function computeTeams(res) {
+  const teams = store.S.teams;
+  if (!teams?.enabled || !Array.isArray(teams.groups)) return [];
+  const mode = teams.scoring === 'bestball' ? 'bestball' : 'sum';
+
+  return teams.groups.map((group, i) => {
+    const members = group.map(pid => store.S.players.find(p => p.id === pid)).filter(Boolean);
+    let total = 0;
+    if (mode === 'sum') {
+      members.forEach(p => { total += res[p.id]?.total || 0; });
+    } else {
+      // Best-ball: take the highest individual total.
+      total = members.reduce((best, p) => Math.max(best, res[p.id]?.total || 0), 0);
+    }
+    return {
+      name:    teams.names[i] || ('Lag ' + (i + 1)),
+      members: members.map(p => p.name),
+      total,
+      mode
+    };
+  });
+}
+
 /* ---------- full event compute ---------- */
 
 export function compute() {
@@ -179,7 +287,8 @@ export function compute() {
       stableSim:  stats.sim[p.id].sum,
       ctp: 0, ld: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
-      cleanBana: false, cleanSim: false, delta: null, badges: []
+      cleanBana: false, cleanSim: false, delta: null, badges: [],
+      tb: 0
     };
   });
 
@@ -237,6 +346,12 @@ export function compute() {
     res[p.id].total = res[p.id].stableBana + res[p.id].stableSim +
                       res[p.id].ctp + res[p.id].ld + res[p.id].tri +
                       res[p.id].cb + res[p.id].hcp;
+  });
+
+  // Compute tiebreak scores after totals are known.
+  const tbMode = gm().tiebreak || 'none';
+  store.S.players.forEach(p => {
+    res[p.id].tb = tiebreakScore(p.id, tbMode);
   });
 
   const comebackLead = Math.max(0, ...store.S.players.map(p => res[p.id].cb));

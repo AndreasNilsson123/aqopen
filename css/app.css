@@ -207,6 +207,16 @@ textarea.bulk{min-height:150px;margin-top:10px;resize:vertical}
   .card{transition:box-shadow .2s ease}
 }
 
+/* ---------- player stats table ---------- */
+.stat-table{width:100%;border-collapse:collapse;font-size:13px}
+.stat-table th{
+  font-family:"Barlow Condensed",sans-serif;text-transform:uppercase;letter-spacing:.08em;
+  font-size:11px;color:var(--muted);text-align:left;padding:0 6px 6px 0;font-weight:600;
+}
+.stat-table th:not(:first-child){text-align:center}
+.stat-lbl{color:var(--muted);padding:4px 6px 4px 0;white-space:nowrap}
+.stat-val{font-family:"IBM Plex Mono",monospace;font-weight:600;text-align:center;color:var(--navy);padding:4px 4px}
+
 /* spelläge */
 .gm-hole{display:flex;align-items:center;gap:16px;padding-bottom:6px}
 .gm-num{font-family:"Barlow Condensed",sans-serif;font-size:60px;font-weight:700;line-height:.9;color:var(--navy)}
