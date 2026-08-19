@@ -3,12 +3,23 @@
  */
 import { HOLES } from '../constants.js';
 import { fmt, el, esc } from '../utils.js';
-import { store } from '../store.js';
+import { canEdit, store } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
   handicapRoundBonus
 } from '../scoring.js';
 import { save } from '../sync.js';
+
+function rerender() {
+  import('../app.js').then(m => m.render());
+}
+
+function winnerNames(ids = []) {
+  return ids
+    .map(id => store.S.players.find(p => p.id === id)?.name)
+    .filter(Boolean)
+    .join(', ');
+}
 
 export function renderRound(rid) {
   const R   = store.S.rounds[rid];
@@ -26,7 +37,6 @@ export function renderRound(rid) {
   const pid    = store.activePlayer[rid];
   const player = store.S.players.find(p => p.id === pid);
 
-  /* Player selector */
   const pick = el(
     '<section class="card">' +
       '<div class="card-head">' + esc(R.label) + '</div>' +
@@ -36,22 +46,22 @@ export function renderRound(rid) {
   const pp = pick.querySelector('#pp');
   store.S.players.forEach(p => {
     const c = el('<button class="chip" aria-pressed="' + (p.id === pid) + '">' + esc(p.name) + (p.handicap ? ' · HCP ' + fmt(p.handicap) : '') + '</button>');
-    c.onclick = () => { store.activePlayer[rid] = p.id; import('../app.js').then(m => m.render()); };
+    c.onclick = () => { store.activePlayer[rid] = p.id; rerender(); };
     pp.appendChild(c);
   });
   box.appendChild(pick);
 
-  /* Scorecard */
   const st       = roundStable(rid, pid);
   const hcpRound = handicapRoundBonus(player, rid, st);
   const sc = el(
     '<section class="card">' +
       '<div class="card-head light">Scorekort' +
-        '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">' + st.sum + ' p' + (hcpRound ? ' · HCP ' + fmt(hcpRound) : '') + '</span>' +
+        '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:13px">' + st.filled + '/18 hål · ' + fmt(st.sum + hcpRound) + ' p' + (hcpRound ? ' · HCP ' + fmt(hcpRound) : '') + '</span>' +
       '</div>' +
       '<div class="card-body">' +
+        (canEdit() ? '' : '<p class="notice" style="margin:0 0 10px">Visningsläge: scorekortet går att läsa men inte ändra på den här enheten.</p>') +
         '<table class="holes"><thead><tr>' +
-          '<th>Hål</th><th>Par</th><th></th><th style="text-align:right">Slag</th><th style="text-align:right">Resultat</th>' +
+          '<th>Hål</th><th>Par</th><th></th><th style="text-align:right">' + (canEdit() ? 'Slag' : 'Score') + '</th><th style="text-align:right">Resultat</th>' +
         '</tr></thead><tbody id="tb"></tbody></table>' +
       '</div>' +
     '</section>'
@@ -70,34 +80,40 @@ export function renderRound(rid) {
       (ruleEnabled('ctp', rid) && R.ctp.includes(i + 1) ? '<span class="tag">CTP</span>' : '') +
       (ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(i + 1) ? '<span class="tag">LD</span>' : '');
 
+    const scoreCell = canEdit()
+      ? '<div class="stepper">' +
+          '<button aria-label="Ett slag mindre">−</button>' +
+          '<input class="strokes' + (v == null ? ' empty' : '') + '" inputmode="numeric" value="' + (v == null ? '–' : v) + '">' +
+          '<button aria-label="Ett slag mer">+</button>' +
+        '</div>'
+      : '<span class="readonly-score">' + (v == null ? '–' : v) + '</span>';
+
     const tr = el(
       '<tr' + (v != null ? ' class="done"' : '') + '>' +
         '<td class="hno">' + (i + 1) + '</td>' +
         '<td class="par">Par ' + par + '</td>' +
         '<td class="tags">' + tags + '</td>' +
-        '<td><div class="stepper">' +
-          '<button aria-label="Ett slag mindre">−</button>' +
-          '<input class="strokes' + (v == null ? ' empty' : '') + '" inputmode="numeric" value="' + (v == null ? '–' : v) + '">' +
-          '<button aria-label="Ett slag mer">+</button>' +
-        '</div></td>' +
+        '<td>' + scoreCell + '</td>' +
         '<td class="res' + (isTri ? ' tri' : '') + '">' + (v == null ? '<span style="color:#B7C2D0">–</span>' : lab + ' <b>' + pts + '</b>') + '</td>' +
       '</tr>'
     );
 
-    const [minus, plus] = tr.querySelectorAll('.stepper button');
-    const input         = tr.querySelector('.strokes');
-    const setVal        = nv => { a[i] = nv; save(); import('../app.js').then(m => m.render()); };
+    if (canEdit()) {
+      const [minus, plus] = tr.querySelectorAll('.stepper button');
+      const input         = tr.querySelector('.strokes');
+      const setVal        = nv => { a[i] = nv; save(); rerender(); };
 
-    minus.onclick  = () => setVal(a[i] == null ? par : Math.max(1, a[i] - 1));
-    plus.onclick   = () => setVal(a[i] == null ? par : Math.min(20, a[i] + 1));
-    input.onfocus  = e  => { if (a[i] == null) e.target.value = ''; e.target.select(); };
-    input.onblur   = e  => {
-      const raw = e.target.value.trim();
-      if (raw === '' || raw === '–') { setVal(null); return; }
-      const n = parseInt(raw, 10);
-      setVal(isNaN(n) ? null : Math.min(20, Math.max(1, n)));
-    };
-    input.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+      minus.onclick   = () => setVal(a[i] == null ? par : Math.max(1, a[i] - 1));
+      plus.onclick    = () => setVal(a[i] == null ? par : Math.min(20, a[i] + 1));
+      input.onfocus   = e  => { if (a[i] == null) e.target.value = ''; e.target.select(); };
+      input.onblur    = e  => {
+        const raw = e.target.value.trim();
+        if (raw === '' || raw === '–') { setVal(null); return; }
+        const n = parseInt(raw, 10);
+        setVal(isNaN(n) ? null : Math.min(20, Math.max(1, n)));
+      };
+      input.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+    }
     tb.appendChild(tr);
   }
 
@@ -121,58 +137,64 @@ export function renderRound(rid) {
   if (hcpRound) sc.querySelector('.card-body').appendChild(el('<p class="empty-note" style="margin:8px 0 0">Handicap i den här ronden: ' + fmt(hcpRound) + ' p.</p>'));
   box.appendChild(sc);
 
-  /* CTP section */
   if (ruleEnabled('ctp', rid)) {
     const ctp = el('<section class="card"><div class="card-head light">Closest to pin</div><div class="card-body" id="cb"></div></section>');
     const cb  = ctp.querySelector('#cb');
-    cb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Markera den som ligger närmast hål. Flera markerade delar på ' + fmt(ruleCfg('ctp').points) + ' poäng.</p>'));
+    cb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera den som ligger närmast hål. Flera markerade delar på ' + fmt(ruleCfg('ctp').points) + ' poäng.' : 'Visar vem som just nu är markerad som närmast hål.') + '</p>'));
     if (!R.ctp.length) cb.appendChild(el('<p class="empty-note">Inga CTP-hål valda för den här ronden. Välj dem under Inställningar.</p>'));
 
     R.ctp.forEach(h => {
       const wrap = el('<div class="subcard"><h4>Hål ' + h + ' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par ' + R.pars[h - 1] + '</span></h4><div class="chips" id="c' + h + '"></div></div>');
       const row  = wrap.querySelector('#c' + h);
       const cur  = store.S.ctpWins[rid][h] || [];
-      store.S.players.forEach(p => {
-        const on = cur.includes(p.id);
-        const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
-        c.onclick = () => {
-          const list = new Set(store.S.ctpWins[rid][h] || []);
-          list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-          store.S.ctpWins[rid][h] = [...list];
-          if (!store.S.ctpWins[rid][h].length) delete store.S.ctpWins[rid][h];
-          save(); import('../app.js').then(m => m.render());
-        };
-        row.appendChild(c);
-      });
+      if (canEdit()) {
+        store.S.players.forEach(p => {
+          const on = cur.includes(p.id);
+          const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
+          c.onclick = () => {
+            const list = new Set(store.S.ctpWins[rid][h] || []);
+            list.has(p.id) ? list.delete(p.id) : list.add(p.id);
+            store.S.ctpWins[rid][h] = [...list];
+            if (!store.S.ctpWins[rid][h].length) delete store.S.ctpWins[rid][h];
+            save(); rerender();
+          };
+          row.appendChild(c);
+        });
+      } else {
+        row.appendChild(el('<span class="empty-note">' + esc(winnerNames(cur) || 'Ingen vinnare markerad ännu') + '</span>'));
+      }
       if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ruleCfg('ctp').points / cur.length) + ' poäng var.</p>'));
       cb.appendChild(wrap);
     });
     box.appendChild(ctp);
   }
 
-  /* Longest drive section */
   if (rid === 'sim' && ruleEnabled('ld', 'sim')) {
     const ld  = el('<section class="card"><div class="card-head light">Längsta drive</div><div class="card-body" id="ldb"></div></section>');
     const ldb = ld.querySelector('#ldb');
-    ldb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Slaget måste landa på fairway. ' + fmt(ruleCfg('ld').points) + ' poäng per hål, delas vid lika.</p>'));
+    ldb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Slaget måste landa på fairway. ' + fmt(ruleCfg('ld').points) + ' poäng per hål, delas vid lika.' : 'Visar vem som just nu är markerad som längsta drive.') + '</p>'));
     if (!R.ld.length) ldb.appendChild(el('<p class="empty-note">Inga drivehål valda. Välj dem under Inställningar.</p>'));
 
     R.ld.forEach(h => {
       const wrap = el('<div class="subcard"><h4>Hål ' + h + '</h4><div class="chips" id="ld' + h + '"></div></div>');
       const row  = wrap.querySelector('#ld' + h);
       const cur  = store.S.ldWins.sim[h] || [];
-      store.S.players.forEach(p => {
-        const on = cur.includes(p.id);
-        const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
-        c.onclick = () => {
-          const list = new Set(store.S.ldWins.sim[h] || []);
-          list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-          store.S.ldWins.sim[h] = [...list];
-          if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
-          save(); import('../app.js').then(m => m.render());
-        };
-        row.appendChild(c);
-      });
+      if (canEdit()) {
+        store.S.players.forEach(p => {
+          const on = cur.includes(p.id);
+          const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
+          c.onclick = () => {
+            const list = new Set(store.S.ldWins.sim[h] || []);
+            list.has(p.id) ? list.delete(p.id) : list.add(p.id);
+            store.S.ldWins.sim[h] = [...list];
+            if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
+            save(); rerender();
+          };
+          row.appendChild(c);
+        });
+      } else {
+        row.appendChild(el('<span class="empty-note">' + esc(winnerNames(cur) || 'Ingen vinnare markerad ännu') + '</span>'));
+      }
       if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ruleCfg('ld').points / cur.length) + ' poäng var.</p>'));
       ldb.appendChild(wrap);
     });

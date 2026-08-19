@@ -9,6 +9,7 @@ import { getStore } from "@netlify/blobs";
 // client can merge and retry, which stops one phone overwriting another.
 
 const KEY = "state";
+const EDIT_KEY = process.env.AQOPEN_KEY?.trim() || "";
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -23,15 +24,28 @@ function store() {
   return getStore({ name: "aqopen", consistency: "strong" });
 }
 
+function canWrite(req) {
+  if (!EDIT_KEY) return true;
+  return req.headers.get("x-aqopen-key") === EDIT_KEY;
+}
+
 export default async (req) => {
   const blobs = store();
 
   if (req.method === "GET") {
     const doc = await blobs.get(KEY, { type: "json" });
-    return json(doc ?? { rev: 0, state: null });
+    return json({
+      rev: doc?.rev ?? 0,
+      state: doc?.state ?? null,
+      updated: doc?.updated ?? null,
+      protected: !!EDIT_KEY,
+    });
   }
 
   if (req.method === "PUT") {
+    if (!canWrite(req)) {
+      return json({ error: "Redigeringsnyckel krävs för att ändra resultat." }, 401);
+    }
     let body;
     try {
       body = await req.json();
@@ -44,7 +58,13 @@ export default async (req) => {
 
     const current = (await blobs.get(KEY, { type: "json" })) ?? { rev: 0, state: null };
     if (body.rev !== current.rev) {
-      return json({ conflict: true, rev: current.rev, state: current.state }, 409);
+      return json({
+        conflict: true,
+        rev: current.rev,
+        state: current.state,
+        updated: current.updated ?? null,
+        protected: !!EDIT_KEY,
+      }, 409);
     }
 
     const next = {
@@ -53,12 +73,15 @@ export default async (req) => {
       updated: new Date().toISOString(),
     };
     await blobs.setJSON(KEY, next);
-    return json({ rev: next.rev });
+    return json({ rev: next.rev, updated: next.updated, protected: !!EDIT_KEY });
   }
 
   if (req.method === "DELETE") {
+    if (!canWrite(req)) {
+      return json({ error: "Redigeringsnyckel krävs för att nollställa resultat." }, 401);
+    }
     await blobs.delete(KEY);
-    return json({ rev: 0, state: null });
+    return json({ rev: 0, state: null, updated: null, protected: !!EDIT_KEY });
   }
 
   return json({ error: "Use GET, PUT or DELETE." }, 405);

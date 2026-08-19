@@ -21,6 +21,23 @@ export function renderLeaderboard() {
   const max    = Math.max(1, ...store.S.players.map(p => res[p.id].total));
   const box    = el('<div></div>');
   const mode   = gm();
+  const totalHoles = store.S.players.length * ROUND_IDS.length * 18;
+  const doneHoles  = store.S.players.reduce((sum, p) =>
+    sum + roundStable('bana', p.id).filled + roundStable('sim', p.id).filled, 0
+  );
+
+  box.appendChild(el(
+    '<section class="card">' +
+      '<div class="card-head light">Läget just nu</div>' +
+      '<div class="card-body">' +
+        '<div class="legend" style="margin-top:0">' +
+          '<span><b>' + store.S.players.length + '</b> spelare</span>' +
+          '<span><b>' + doneHoles + '/' + Math.max(totalHoles, 1) + '</b> registrerade hål</span>' +
+          '<span><b>' + (store.S.live ? store.S.rounds[store.S.live.round].label + ' hål ' + store.S.live.hole : 'ingen live-rond') + '</b></span>' +
+        '</div>' +
+      '</div>' +
+    '</section>'
+  ));
 
   /* Leader banner */
   if (sorted.length && res[sorted[0].id].total > 0) {
@@ -58,6 +75,8 @@ export function renderLeaderboard() {
 
   sorted.forEach((p, i) => {
     const r   = res[p.id];
+    const banaStats = roundStable('bana', p.id);
+    const simStats  = roundStable('sim', p.id);
     const seg = (cls, val) => val > 0 ? '<i class="' + cls + '" style="width:' + (val / max * 100) + '%"></i>' : '';
     const badges = [];
     if (i === 0 && r.total > 0) badges.push('Leder');
@@ -82,6 +101,7 @@ export function renderLeaderboard() {
             seg('s-hcp', r.hcp) +
           '</div>' +
           '<div class="lb-break">' +
+            '<span>Klart <b>' + (banaStats.filled + simStats.filled) + '/36</b></span>' +
             '<span>Bana <b>' + fmt(r.stableBana) + '</b></span>' +
             '<span>Sim <b>'  + fmt(r.stableSim)  + '</b></span>' +
             '<span>CTP <b>'  + fmt(r.ctp)         + '</b></span>' +

@@ -55,6 +55,9 @@ Clients poll every 6 seconds, and immediately when a phone wakes up. If the
 API is unreachable the app keeps scoring against `localStorage` and pushes up
 when the connection returns; the status bar says which mode it's in.
 
+The app also ships as a lightweight PWA, so after the first visit you can
+install it to a phone home screen for quicker access during the event.
+
 ## Adding courses
 
 There is no free public source for Swedish course scorecards — SGF's GIT is
@@ -80,11 +83,34 @@ Either use **Nollställ alla resultat** in the app, or wipe the blob entirely:
 curl -X DELETE https://<your-site>.netlify.app/api/state
 ```
 
+Before the reset is applied, the browser stores one local recovery snapshot.
+That snapshot can later be restored from **Inställningar → Backup & import**.
+
+## Edit key / read-only mode
+
+If you want everyone to see the leaderboard but only a few phones to edit,
+set a Netlify environment variable named `AQOPEN_KEY`. When present:
+
+- `GET /api/state` still works for everyone
+- `PUT` and `DELETE` require the same value in the `x-aqopen-key` header
+- the app lets each phone save that key locally under **Inställningar**
+- phones without the key automatically become read-only until the key is set
+
+There is also a browser-local **Visningsläge** toggle in **Inställningar**.
+Use that on a spectator screen even if the site itself is not key-protected.
+
+## Backup / restore
+
+Under **Inställningar → Backup & import** you can:
+
+- export the full shared state as JSON
+- import a previous JSON backup
+- restore the latest locally saved pre-reset snapshot
+
 ## One caveat
 
-The URL is public and unauthenticated — anyone with the link can edit scores.
-That is usually fine for a four-player company outing on an unguessable site
-name. To lock it down, Netlify's password protection (site-wide, paid plans)
-is the least intrusive option; otherwise put a shared secret in an
-`x-aqopen-key` header and check it against a Netlify environment variable in
-`state.mjs`.
+Without `AQOPEN_KEY`, the URL is still public and unauthenticated — anyone
+with the link can edit scores. That is usually fine for a four-player company
+outing on an unguessable site name. To lock it down cheaply, use the shared
+key support above; Netlify's site-wide password protection is still another
+option on paid plans.

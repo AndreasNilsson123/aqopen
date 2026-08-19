@@ -3,29 +3,25 @@
  *
  * Settings are organised into collapsible <details> panels so users can focus
  * on the section they need without being overwhelmed by the full flat list.
- *
- * Sections:
- *   1. Tävling      – event name
- *   2. Spelformat   – preset picker + active-rules summary
- *   3. Poängscale   – Stableford point values (advanced, closed by default)
- *   4. Bonusar      – CTP / LD / Clean round / Comeback toggles & values
- *   5. Handicap     – handicap model (advanced, closed by default)
- *   6. Spelare      – player list
- *   7. Bana (ute)   – course, par grid, CTP holes
- *   8. Simulator    – course, par grid, CTP / LD holes
- *   9. Nollställ    – danger zone
  */
-import { HOLES, ROUND_IDS, ROUND_LABELS, PRESET_LIBRARY } from '../constants.js';
-import { clamp, num, fmt, el, esc } from '../utils.js';
-import { makePlayer, presetConfig, fixHoleChoicesState } from '../state.js';
-import { store, allCourses } from '../store.js';
+import { HOLES, ROUND_IDS, ROUND_LABELS } from '../constants.js';
+import { clamp, num, fmt, el, esc, clone } from '../utils.js';
+import { makePlayer, presetConfig, fixHoleChoicesState, migrateState } from '../state.js';
+import {
+  allCourses, canEdit, clearResetBackup, loadResetBackup,
+  persistLocalPrefs, saveResetBackup, store
+} from '../store.js';
 import {
   gm, ruleEnabled, ruleCfg, gamemodeLines, stablefordSummary,
   handicapModeLabel, handicapAppliesLabel
 } from '../scoring.js';
-import { save } from '../sync.js';
+import { save, setStatus, syncedNote } from '../sync.js';
 
 /* ---- helpers ---- */
+
+function rerender() {
+  import('../app.js').then(m => m.render());
+}
 
 /** Marks the gamemode as "custom" before any mutation. */
 function touchGamemode() {
@@ -42,9 +38,9 @@ function fixHoleChoices(rid) {
 
 function applyCourse(rid, course) {
   if (!course) return;
-  const R        = store.S.rounds[rid];
-  R.pars         = [...course.pars];
-  R.courseName   = course.name;
+  const R      = store.S.rounds[rid];
+  R.pars       = [...course.pars];
+  R.courseName = course.name;
   fixHoleChoices(rid);
   save();
 }
@@ -66,26 +62,212 @@ function section(title, preview, bodyFn, { open = false } = {}) {
   return d;
 }
 
+function warnings() {
+  const out = [];
+  if (store.S.players.length < 2) out.push('Lägg till minst två spelare för att få en riktig ställning.');
+  if (store.authRequired && !store.local.editKey.trim()) out.push('Redigeringsnyckel saknas på den här enheten, så sidan är just nu bara läsbar.');
+  ROUND_IDS.forEach(rid => {
+    const round = store.S.rounds[rid];
+    if (!round.courseName.trim()) out.push(round.label + ' saknar valt ban-namn.');
+    if (ruleEnabled('ctp', rid) && !round.ctp.length) out.push(round.label + ' har CTP aktiverat men inga CTP-hål valda.');
+  });
+  if (ruleEnabled('ld', 'sim') && !store.S.rounds.sim.ld.length) out.push('Simulatorn har längsta drive aktiverat men inga drivehål valda.');
+  return out;
+}
+
+function readonlyMessage(body, text = 'Aktivera redigering för att ändra delad data.') {
+  body.appendChild(el('<p class="notice warn" style="margin:0">' + esc(text) + '</p>'));
+}
+
+function resetExport(area) {
+  area.value = JSON.stringify({ state: store.S }, null, 2);
+}
+
+function triggerDownload(filename, content) {
+  const blob = new Blob([content], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /* ====================================================================== */
-/* Section builders                                                         */
+/* Section builders                                                        */
 /* ====================================================================== */
+
+function buildAccessSection(box) {
+  const preview = canEdit()
+    ? 'Redigering aktiv'
+    : (store.local.spectator ? 'Visningsläge' : 'Läsbar tills nyckel läggs in');
+
+  box.appendChild(section('Åtkomst & visningsläge', preview, body => {
+    body.appendChild(el(
+      '<p class="empty-note" style="margin:0 0 10px">' +
+        (store.authRequired
+          ? 'API:t är låst med redigeringsnyckel. Spara nyckeln lokalt på den här enheten för att kunna ändra resultat.'
+          : 'API:t är öppet för redigering. Du kan ändå slå på visningsläge lokalt för att undvika misstag på den här enheten.') +
+      '</p>'
+    ));
+
+    const keyRow = el('<div class="field"><label>Nyckel</label><input type="password" placeholder="Valfri redigeringsnyckel" value="' + esc(store.local.editKey) + '"></div>');
+    const keyInp = keyRow.querySelector('input');
+    keyInp.onblur = () => {
+      store.local.editKey = keyInp.value.trim();
+      persistLocalPrefs();
+      setStatus(syncedNote(), true);
+      rerender();
+    };
+    keyInp.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
+    body.appendChild(keyRow);
+
+    const localMode = el('<div class="subcard"><h4>Den här enheten</h4><p>Visningsläge döljer score-inmatning och hindrar lokala försök att spara ändringar.</p><div class="chips"></div></div>');
+    const chips = localMode.querySelector('.chips');
+    const editChip = el('<button class="chip" aria-pressed="' + (!store.local.spectator) + '">Redigering</button>');
+    const viewChip = el('<button class="chip blue" aria-pressed="' + store.local.spectator + '">Visningsläge</button>');
+    editChip.onclick = () => {
+      store.local.spectator = false;
+      persistLocalPrefs();
+      setStatus(syncedNote(), true);
+      rerender();
+    };
+    viewChip.onclick = () => {
+      store.local.spectator = true;
+      persistLocalPrefs();
+      setStatus(syncedNote(), true);
+      rerender();
+    };
+    chips.appendChild(editChip);
+    chips.appendChild(viewChip);
+    body.appendChild(localMode);
+
+    if (store.authRequired && !store.local.editKey.trim()) {
+      readonlyMessage(body, 'Lägg in redigeringsnyckeln ovan för att låsa upp score-inmatning och återställning.');
+    } else if (store.local.spectator) {
+      readonlyMessage(body, 'Visningsläge är aktivt på den här enheten. Växla tillbaka till Redigering för att ändra resultat.');
+    }
+  }, { open: true }));
+}
+
+function buildValidationSection(box) {
+  const items   = warnings();
+  const preview = items.length ? items.length + ' behöver ses över' : 'Redo att spela';
+  box.appendChild(section('Snabbcheck', preview, body => {
+    if (!items.length) {
+      body.appendChild(el('<p class="notice good" style="margin:0">Grundinställningarna ser bra ut: spelare, bonushål och åtkomst är redo.</p>'));
+      return;
+    }
+    body.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Fixa gärna det här innan ni börjar eller delar sidan brett.</p>'));
+    body.appendChild(el('<ul class="rules" style="margin:0;padding-left:18px">' + items.map(item => '<li>' + esc(item) + '</li>').join('') + '</ul>'));
+  }, { open: items.length > 0 }));
+}
+
+function buildBackupSection(box) {
+  const backup = loadResetBackup();
+  const preview = backup ? 'Export, import & återställning finns sparat' : 'Export & import';
+
+  box.appendChild(section('Backup & import', preview, body => {
+    const exportCard = el(
+      '<div class="subcard">' +
+        '<h4>Exportera tävlingen</h4>' +
+        '<p>Skapa en JSON-backup innan ni ändrar format, nollställer eller byter bana.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="btn ghost" data-act="fill">Visa JSON</button>' +
+          '<button class="btn ghost" data-act="download">Ladda ner backup</button>' +
+        '</div>' +
+        '<textarea class="bulk" readonly placeholder="JSON-backup visas här"></textarea>' +
+      '</div>'
+    );
+    const exportArea = exportCard.querySelector('textarea');
+    exportCard.querySelector('[data-act="fill"]').onclick = () => resetExport(exportArea);
+    exportCard.querySelector('[data-act="download"]').onclick = () => {
+      const content = JSON.stringify({ state: store.S }, null, 2);
+      triggerDownload('aqopen-backup-' + new Date().toISOString().slice(0, 10) + '.json', content);
+    };
+    body.appendChild(exportCard);
+
+    const importCard = el(
+      '<div class="subcard">' +
+        '<h4>Importera tävling</h4>' +
+        '<p>Klistra in en tidigare export. Om servern redan har data ersätter importen den delade tävlingen vid nästa sparning.</p>' +
+        '<textarea class="bulk" placeholder="Klistra in { state: ... } eller bara state-objektet här"></textarea>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost">Importera JSON</button></div>' +
+        '<p class="empty-note" id="import-msg" style="margin:8px 0 0"></p>' +
+      '</div>'
+    );
+    const importArea = importCard.querySelector('textarea');
+    const importMsg  = importCard.querySelector('#import-msg');
+    importCard.querySelector('button').onclick = () => {
+      if (!canEdit()) {
+        importMsg.textContent = 'Import kräver redigeringsläge.';
+        return;
+      }
+      try {
+        const raw = JSON.parse(importArea.value);
+        store.S = migrateState(raw?.state || raw || {});
+        store.tab = 'lb';
+        save();
+        rerender();
+        importMsg.textContent = 'Importen är inläst och sparas till delat läge.';
+      } catch {
+        importMsg.textContent = 'Kunde inte läsa JSON-innehållet.';
+      }
+    };
+    body.appendChild(importCard);
+
+    const restoreCard = el(
+      '<div class="subcard">' +
+        '<h4>Återställ senaste nollställning</h4>' +
+        '<p>Appen sparar den senaste tävlingsbilden lokalt innan du nollställer resultat.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="btn ghost">Återställ senaste backup</button>' +
+          '<button class="btn danger">Rensa backup</button>' +
+        '</div>' +
+        '<p class="empty-note" id="restore-msg" style="margin:8px 0 0">' + (backup ? 'En lokal reset-backup finns sparad på den här enheten.' : 'Ingen reset-backup sparad ännu.') + '</p>' +
+      '</div>'
+    );
+    const restoreMsg = restoreCard.querySelector('#restore-msg');
+    const [restoreBtn, clearBtn] = restoreCard.querySelectorAll('button');
+    restoreBtn.onclick = () => {
+      const latest = loadResetBackup();
+      if (!latest) { restoreMsg.textContent = 'Ingen backup finns att återställa.'; return; }
+      if (!canEdit()) { restoreMsg.textContent = 'Återställning kräver redigeringsläge.'; return; }
+      store.S = migrateState(clone(latest));
+      store.tab = 'lb';
+      save();
+      rerender();
+      restoreMsg.textContent = 'Senaste reset-backupen är återställd.';
+    };
+    clearBtn.onclick = () => {
+      clearResetBackup();
+      restoreMsg.textContent = 'Backupen är rensad från den här enheten.';
+    };
+    body.appendChild(restoreCard);
+  }));
+}
 
 function buildEventSection(box) {
   const preview = store.S.event || 'AqOpen Sweden';
   box.appendChild(section('Tävling', preview, body => {
     const row   = el('<div class="field"><label>Namn</label><input type="text" value="' + esc(store.S.event) + '"></div>');
     const input = row.querySelector('input');
-    input.onblur    = () => { store.S.event = input.value.trim() || 'AqOpen Sweden'; save(); import('../app.js').then(m => m.render()); };
+    input.onblur    = () => { store.S.event = input.value.trim() || 'AqOpen Sweden'; save(); rerender(); };
     input.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
     body.appendChild(row);
-    body.appendChild(el('<p class="empty-note" style="margin:4px 0 0">Visas i appens rubrik.</p>'));
+    body.appendChild(el('<p class="empty-note" style="margin:4px 0 0">Visas i appens rubrik och i PWA-installationen.</p>'));
   }, { open: true }));
 }
 
 function buildFormatSection(box) {
   const mode = gm();
   box.appendChild(section('Spelformat', mode.name, body => {
-    /* Preset selector */
+    body.appendChild(el(
+      '<div class="subcard"><h4>Preset-hjälp</h4><p>' +
+        'AqOpen Classic använder bonusar och comeback. Enkel Stableford stänger av extra bonusar. Eget upplägg låter dig justera allt själv.' +
+      '</p></div>'
+    ));
+
     const presetRow = el('<div class="field"><label>Preset</label><select></select></div>');
     const sel       = presetRow.querySelector('select');
     [['aqopen', 'AqOpen Classic'], ['stableford', 'Enkel Stableford'], ['custom', 'Eget upplägg']].forEach(([id, name]) => {
@@ -95,20 +277,18 @@ function buildFormatSection(box) {
       sel.appendChild(o);
     });
     sel.onchange = () => {
-      if (sel.value === 'custom') { touchGamemode(); }
-      else                        { store.S.gamemode = presetConfig(sel.value); }
-      save(); import('../app.js').then(m => m.render());
+      if (sel.value === 'custom') touchGamemode();
+      else                        store.S.gamemode = presetConfig(sel.value);
+      save(); rerender();
     };
     body.appendChild(presetRow);
 
-    /* Format name (only relevant when custom) */
     const nameRow   = el('<div class="field"><label>Namn</label><input type="text" value="' + esc(store.S.gamemode.name) + '"></div>');
     const nameInput = nameRow.querySelector('input');
-    nameInput.onblur    = () => { touchGamemode(); store.S.gamemode.name = nameInput.value.trim() || 'Eget upplägg'; save(); import('../app.js').then(m => m.render()); };
+    nameInput.onblur    = () => { touchGamemode(); store.S.gamemode.name = nameInput.value.trim() || 'Eget upplägg'; save(); rerender(); };
     nameInput.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
     body.appendChild(nameRow);
 
-    /* Active rules summary */
     body.appendChild(el(
       '<div class="subcard"><h4>Aktiva regler</h4>' +
         '<ul class="rules" style="margin:0;padding-left:18px">' +
@@ -129,7 +309,7 @@ function buildStablefordSection(box) {
       cell.querySelector('input').onchange = e => {
         touchGamemode();
         store.S.gamemode.stableford[key] = clamp(num(e.target.value, 0), -20, 50);
-        save(); import('../app.js').then(m => m.render());
+        save(); rerender();
       };
       grid.appendChild(cell);
     });
@@ -160,8 +340,8 @@ function buildBonusSection(box) {
           '<div class="chips bonus-rounds"></div>' +
         '</div>'
       );
-      card.querySelector('button').onclick       = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); import('../app.js').then(m => m.render()); };
-      card.querySelector('input').onchange       = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); import('../app.js').then(m => m.render()); };
+      card.querySelector('button').onclick = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); rerender(); };
+      card.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
       const chips = card.querySelector('.bonus-rounds');
       if (rounds.length) {
         rounds.forEach(rid => {
@@ -169,7 +349,7 @@ function buildBonusSection(box) {
           chip.onclick = () => {
             touchGamemode();
             store.S.gamemode.bonuses[key].rounds[rid] = !rule.rounds[rid];
-            save(); import('../app.js').then(m => m.render());
+            save(); rerender();
           };
           chips.appendChild(chip);
         });
@@ -191,21 +371,21 @@ function buildHandicapSection(box) {
     const modeRow = el('<div class="field"><label>Modell</label><select><option value="none">Ingen</option><option value="flat">Fast bonus</option><option value="allowance">Procentuell</option></select></div>');
     const hcMode  = modeRow.querySelector('select');
     hcMode.value    = hc.mode;
-    hcMode.onchange = e => { touchGamemode(); store.S.gamemode.handicap.mode = e.target.value; save(); import('../app.js').then(m => m.render()); };
+    hcMode.onchange = e => { touchGamemode(); store.S.gamemode.handicap.mode = e.target.value; save(); rerender(); };
     body.appendChild(modeRow);
 
     const applyRow = el('<div class="field"><label>Gäller</label><select><option value="event">Totalt</option><option value="both">Båda ronderna</option><option value="bana">Bana</option><option value="sim">Simulator</option></select></div>');
     const hcApply  = applyRow.querySelector('select');
     hcApply.value    = hc.appliesTo;
-    hcApply.onchange = e => { touchGamemode(); store.S.gamemode.handicap.appliesTo = e.target.value; save(); import('../app.js').then(m => m.render()); };
+    hcApply.onchange = e => { touchGamemode(); store.S.gamemode.handicap.appliesTo = e.target.value; save(); rerender(); };
     body.appendChild(applyRow);
 
-    const allowRow  = el('<div class="field"><label>Allowance %</label><input type="number" value="' + hc.allowance + '"></div>');
-    allowRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.allowance = clamp(num(e.target.value, 100), 0, 200); save(); import('../app.js').then(m => m.render()); };
+    const allowRow = el('<div class="field"><label>Allowance %</label><input type="number" value="' + hc.allowance + '"></div>');
+    allowRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.allowance = clamp(num(e.target.value, 100), 0, 200); save(); rerender(); };
     body.appendChild(allowRow);
 
-    const valueRow  = el('<div class="field"><label>Värde / pt</label><input type="number" step="0.5" value="' + hc.pointValue + '"></div>');
-    valueRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.pointValue = clamp(num(e.target.value, 1), -10, 10); save(); import('../app.js').then(m => m.render()); };
+    const valueRow = el('<div class="field"><label>Värde / pt</label><input type="number" step="0.5" value="' + hc.pointValue + '"></div>');
+    valueRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.pointValue = clamp(num(e.target.value, 1), -10, 10); save(); rerender(); };
     body.appendChild(valueRow);
   }));
 }
@@ -214,7 +394,7 @@ function buildPlayersSection(box) {
   const preview = store.S.players.length + ' spelare';
   box.appendChild(section('Spelare', preview, body => {
     store.S.players.forEach((p, i) => {
-      const f   = el(
+      const f = el(
         '<div class="subcard" style="margin-top:0;margin-bottom:8px">' +
           '<div class="field"><label>Namn</label><input type="text" value="' + esc(p.name) + '"></div>' +
           '<div class="field"><label>Handicap</label><input type="number" step="0.5" value="' + p.handicap + '">' +
@@ -225,9 +405,9 @@ function buildPlayersSection(box) {
       const inp = f.querySelector('input[type=text]');
       const hcp = f.querySelector('input[type=number]');
       const del = f.querySelector('button');
-      inp.onblur    = () => { p.name = inp.value.trim() || 'Spelare ' + (i + 1); save(); import('../app.js').then(m => m.render()); };
+      inp.onblur    = () => { p.name = inp.value.trim() || 'Spelare ' + (i + 1); save(); rerender(); };
       inp.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
-      hcp.onchange  = () => { p.handicap = clamp(num(hcp.value, 0), -36, 54); save(); import('../app.js').then(m => m.render()); };
+      hcp.onchange  = () => { p.handicap = clamp(num(hcp.value, 0), -36, 54); save(); rerender(); };
       del.onclick   = () => {
         store.S.players = store.S.players.filter(x => x.id !== p.id);
         ['bana', 'sim'].forEach(r => {
@@ -241,15 +421,15 @@ function buildPlayersSection(box) {
           store.S.ldWins.sim[h] = store.S.ldWins.sim[h].filter(id => id !== p.id);
           if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
         });
-        save(); import('../app.js').then(m => m.render());
+        save(); rerender();
       };
       body.appendChild(f);
     });
 
-    const add   = el('<button class="btn ghost">+ Lägg till spelare</button>');
+    const add = el('<button class="btn ghost">+ Lägg till spelare</button>');
     add.onclick = () => {
       store.S.players.push(makePlayer('Spelare ' + (store.S.players.length + 1)));
-      save(); import('../app.js').then(m => m.render());
+      save(); rerender();
     };
     body.appendChild(add);
   }, { open: true }));
@@ -261,24 +441,23 @@ function buildRoundSection(rid, box) {
   const preview = (R.courseName || 'ingen bana vald') + ' · par ' + total;
 
   box.appendChild(section(R.label, preview, body => {
-    /* Course picker */
     body.appendChild(el('<h3 class="sec">Bana</h3>'));
-    const list     = allCourses();
-    const sel      = el('<select><option value="">Välj bana…</option></select>');
+    const list = allCourses();
+    const sel  = el('<select><option value="">Välj bana…</option></select>');
     list.forEach((course, ix) => {
-      const o     = document.createElement('option');
-      o.value     = String(ix);
+      const o       = document.createElement('option');
+      o.value       = String(ix);
       o.textContent = course.name + (course.own ? ' (egen)' : '') + ' · par ' + course.pars.reduce((a, b) => a + b, 0);
       if (course.name === R.courseName) o.selected = true;
       sel.appendChild(o);
     });
     const applyRow = el('<div class="field" style="align-items:stretch"></div>');
     applyRow.appendChild(sel);
-    const useBtn   = el('<button class="btn" style="white-space:nowrap">Använd</button>');
+    const useBtn = el('<button class="btn" style="white-space:nowrap">Använd</button>');
     useBtn.onclick = () => {
       if (sel.value === '') return;
       applyCourse(rid, list[+sel.value]);
-      import('../app.js').then(m => m.render());
+      rerender();
     };
     applyRow.appendChild(useBtn);
     body.appendChild(applyRow);
@@ -286,7 +465,6 @@ function buildRoundSection(rid, box) {
     const chosen = list[+sel.value];
     if (chosen && chosen.note) body.appendChild(el('<p class="empty-note" style="margin:0 0 6px">' + esc(chosen.note) + '</p>'));
 
-    /* Paste pars */
     const paste = el(
       '<div class="subcard">' +
         '<h4>Klistra in par från scorekortet</h4>' +
@@ -299,16 +477,15 @@ function buildRoundSection(rid, box) {
     const pInput = paste.querySelector('input'), pMsg = paste.querySelector('#pmsg');
     paste.querySelector('button').onclick = () => {
       const nums = (pInput.value.match(/\d+/g) || []).map(Number);
-      if (nums.length !== HOLES)             { pMsg.textContent = 'Hittade ' + nums.length + ' siffror, behöver 18.'; return; }
-      if (nums.some(n => n < 3 || n > 6))   { pMsg.textContent = 'Par ska ligga mellan 3 och 6.'; return; }
+      if (nums.length !== HOLES)           { pMsg.textContent = 'Hittade ' + nums.length + ' siffror, behöver 18.'; return; }
+      if (nums.some(n => n < 3 || n > 6)) { pMsg.textContent = 'Par ska ligga mellan 3 och 6.'; return; }
       R.pars       = nums;
       R.courseName = R.courseName || 'Inklistrad bana';
       fixHoleChoices(rid);
-      save(); import('../app.js').then(m => m.render());
+      save(); rerender();
     };
     body.appendChild(paste);
 
-    /* Save custom course */
     const saveC = el(
       '<div class="subcard">' +
         '<h4>Spara som egen bana</h4>' +
@@ -324,11 +501,10 @@ function buildRoundSection(rid, box) {
       store.S.customCourses = (store.S.customCourses || []).filter(c => c.name !== nm);
       store.S.customCourses.push({ name: nm, pars: [...R.pars] });
       R.courseName = nm;
-      save(); import('../app.js').then(m => m.render());
+      save(); rerender();
     };
     body.appendChild(saveC);
 
-    /* Custom course list */
     if ((store.S.customCourses || []).length) {
       const own = el('<div style="margin-top:12px"><h3 class="sec">Egna banor</h3></div>');
       store.S.customCourses.forEach(course => {
@@ -340,7 +516,7 @@ function buildRoundSection(rid, box) {
         const del = el('<button class="btn danger" style="padding:6px 10px">Ta bort</button>');
         del.onclick = () => {
           store.S.customCourses = store.S.customCourses.filter(x => x.name !== course.name);
-          save(); import('../app.js').then(m => m.render());
+          save(); rerender();
         };
         line.appendChild(del);
         own.appendChild(line);
@@ -348,7 +524,6 @@ function buildRoundSection(rid, box) {
       body.appendChild(own);
     }
 
-    /* Par grid */
     body.appendChild(el('<h3 class="sec" style="margin-top:18px">Par per hål</h3>'));
     const grid = el('<div class="parGrid"></div>');
     R.pars.forEach((p, i) => {
@@ -357,38 +532,36 @@ function buildRoundSection(rid, box) {
       inp.onchange = () => {
         R.pars[i] = Math.min(6, Math.max(3, parseInt(inp.value, 10) || 4));
         fixHoleChoices(rid);
-        save(); import('../app.js').then(m => m.render());
+        save(); rerender();
       };
       grid.appendChild(cell);
     });
     body.appendChild(grid);
 
-    /* CTP holes */
     const par3 = R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p === 3).map(x => x.h);
     body.appendChild(el('<h3 class="sec" style="margin-top:18px">Closest to pin – välj hål</h3>'));
     const ctpRow = el('<div class="chips"></div>');
     (par3.length ? par3 : R.pars.map((_, i) => i + 1)).forEach(h => {
-      const on = R.ctp.includes(h);
-      const b  = el('<button class="chip blue" aria-pressed="' + on + '">Hål ' + h + '</button>');
+      const b = el('<button class="chip blue" aria-pressed="' + R.ctp.includes(h) + '">Hål ' + h + '</button>');
       b.onclick = () => {
+        const on = R.ctp.includes(h);
         R.ctp = on ? R.ctp.filter(x => x !== h) : [...R.ctp, h].sort((a, b) => a - b);
-        save(); import('../app.js').then(m => m.render());
+        save(); rerender();
       };
       ctpRow.appendChild(b);
     });
     body.appendChild(ctpRow);
     body.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + (par3.length ? 'Visar bara par 3-hål.' : 'Inga par 3-hål inlagda ännu – välj par först.') + '</p>'));
 
-    /* LD holes (simulator only) */
     if (rid === 'sim') {
       body.appendChild(el('<h3 class="sec" style="margin-top:18px">Längsta drive – välj hål</h3>'));
       const ldRow = el('<div class="chips"></div>');
       R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p >= 4).forEach(x => {
-        const on = R.ld.includes(x.h);
-        const b  = el('<button class="chip blue" aria-pressed="' + on + '">Hål ' + x.h + '</button>');
+        const b = el('<button class="chip blue" aria-pressed="' + R.ld.includes(x.h) + '">Hål ' + x.h + '</button>');
         b.onclick = () => {
+          const on = R.ld.includes(x.h);
           R.ld = on ? R.ld.filter(y => y !== x.h) : [...R.ld, x.h].sort((a, b) => a - b);
-          save(); import('../app.js').then(m => m.render());
+          save(); rerender();
         };
         ldRow.appendChild(b);
       });
@@ -402,7 +575,7 @@ function buildResetSection(box) {
     '<div class="card" style="border-color:#C48B7A">' +
       '<div class="card-body">' +
         '<h3 class="sec" style="color:var(--warn)">Nollställ</h3>' +
-        '<p class="empty-note" style="margin:0 0 10px">Tar bort alla slag, CTP- och drivemarkeringar. Spelare, handicap och spelformat behålls.</p>' +
+        '<p class="empty-note" style="margin:0 0 10px">Tar bort alla slag, CTP- och drivemarkeringar. Spelare, handicap och spelformat behålls. En lokal reset-backup sparas först.</p>' +
         '<button class="btn danger">Nollställ alla resultat</button>' +
       '</div>' +
     '</div>'
@@ -411,22 +584,29 @@ function buildResetSection(box) {
   btn.onclick = () => {
     btn.textContent = 'Tryck igen för att bekräfta';
     btn.onclick     = () => {
-      store.S.strokes  = { bana: {}, sim: {} };
-      store.S.ctpWins  = { bana: {}, sim: {} };
-      store.S.ldWins   = { sim: {} };
-      store.S.live     = null;
-      save(); import('../app.js').then(m => m.render());
+      saveResetBackup(clone(store.S));
+      store.S.strokes = { bana: {}, sim: {} };
+      store.S.ctpWins = { bana: {}, sim: {} };
+      store.S.ldWins  = { sim: {} };
+      store.S.live    = null;
+      save(); rerender();
     };
   };
   box.appendChild(rc);
 }
 
 /* ====================================================================== */
-/* Main export                                                              */
+/* Main export                                                             */
 /* ====================================================================== */
 
 export function renderConfig() {
   const box = el('<div></div>');
+
+  buildAccessSection(box);
+  buildValidationSection(box);
+  buildBackupSection(box);
+
+  if (!canEdit()) return box;
 
   buildEventSection(box);
   buildFormatSection(box);
@@ -434,10 +614,7 @@ export function renderConfig() {
   buildBonusSection(box);
   buildHandicapSection(box);
   buildPlayersSection(box);
-
-  /* One section per round */
   ROUND_IDS.forEach(rid => buildRoundSection(rid, box));
-
   buildResetSection(box);
 
   return box;
