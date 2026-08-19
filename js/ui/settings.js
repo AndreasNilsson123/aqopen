@@ -187,25 +187,26 @@ function buildBackupSection(box) {
     };
     body.appendChild(exportCard);
 
+    if (!canEdit()) {
+      body.appendChild(el('<p class="notice" style="margin:12px 0 0">Import och återställning visas först när den här enheten är i redigeringsläge.</p>'));
+      return;
+    }
+
     const importCard = el(
       '<div class="subcard">' +
         '<h4>Importera tävling</h4>' +
         '<p>Klistra in en tidigare export. Om servern redan har data ersätter importen den delade tävlingen vid nästa sparning.</p>' +
         '<textarea class="bulk" placeholder="Klistra in { state: ... } eller bara state-objektet här"></textarea>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost">Importera JSON</button></div>' +
-        '<p class="empty-note" id="import-msg" style="margin:8px 0 0"></p>' +
+        '<p class="empty-note import-msg" style="margin:8px 0 0"></p>' +
       '</div>'
     );
     const importArea = importCard.querySelector('textarea');
-    const importMsg  = importCard.querySelector('#import-msg');
+    const importMsg  = importCard.querySelector('.import-msg');
     importCard.querySelector('button').onclick = () => {
-      if (!canEdit()) {
-        importMsg.textContent = 'Import kräver redigeringsläge.';
-        return;
-      }
       try {
         const raw = JSON.parse(importArea.value);
-        store.S = migrateState(raw?.state || raw || {});
+        store.S = migrateState(raw?.state ?? (typeof raw === 'object' && raw !== null ? raw : {}));
         store.tab = 'lb';
         save();
         rerender();
@@ -224,15 +225,14 @@ function buildBackupSection(box) {
           '<button class="btn ghost">Återställ senaste backup</button>' +
           '<button class="btn danger">Rensa backup</button>' +
         '</div>' +
-        '<p class="empty-note" id="restore-msg" style="margin:8px 0 0">' + (backup ? 'En lokal reset-backup finns sparad på den här enheten.' : 'Ingen reset-backup sparad ännu.') + '</p>' +
+        '<p class="empty-note restore-msg" style="margin:8px 0 0">' + (backup ? 'En lokal reset-backup finns sparad på den här enheten.' : 'Ingen reset-backup sparad ännu.') + '</p>' +
       '</div>'
     );
-    const restoreMsg = restoreCard.querySelector('#restore-msg');
+    const restoreMsg = restoreCard.querySelector('.restore-msg');
     const [restoreBtn, clearBtn] = restoreCard.querySelectorAll('button');
     restoreBtn.onclick = () => {
       const latest = loadResetBackup();
       if (!latest) { restoreMsg.textContent = 'Ingen backup finns att återställa.'; return; }
-      if (!canEdit()) { restoreMsg.textContent = 'Återställning kräver redigeringsläge.'; return; }
       store.S = migrateState(clone(latest));
       store.tab = 'lb';
       save();
@@ -471,10 +471,10 @@ function buildRoundSection(rid, box) {
         '<p>18 siffror, hål 1 först. Mellanslag, komma eller radbrytning spelar ingen roll.</p>' +
         '<input type="text" placeholder="4 4 3 5 4 4 3 4 5 4 3 4 5 4 4 3 4 5">' +
         '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn ghost">Läs in par</button></div>' +
-        '<p class="empty-note" id="pmsg" style="margin:8px 0 0"></p>' +
+        '<p class="empty-note paste-msg" style="margin:8px 0 0"></p>' +
       '</div>'
     );
-    const pInput = paste.querySelector('input'), pMsg = paste.querySelector('#pmsg');
+    const pInput = paste.querySelector('input'), pMsg = paste.querySelector('.paste-msg');
     paste.querySelector('button').onclick = () => {
       const nums = (pInput.value.match(/\d+/g) || []).map(Number);
       if (nums.length !== HOLES)           { pMsg.textContent = 'Hittade ' + nums.length + ' siffror, behöver 18.'; return; }

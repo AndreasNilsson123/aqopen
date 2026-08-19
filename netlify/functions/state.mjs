@@ -44,7 +44,7 @@ export default async (req) => {
 
   if (req.method === "PUT") {
     if (!canWrite(req)) {
-      return json({ error: "Redigeringsnyckel krävs för att ändra resultat." }, 401);
+      return json({ error: "Edit key required to change scores." }, 403);
     }
     let body;
     try {
@@ -78,7 +78,7 @@ export default async (req) => {
 
   if (req.method === "DELETE") {
     if (!canWrite(req)) {
-      return json({ error: "Redigeringsnyckel krävs för att nollställa resultat." }, 401);
+      return json({ error: "Edit key required to reset scores." }, 403);
     }
     await blobs.delete(KEY);
     return json({ rev: 0, state: null, updated: null, protected: !!EDIT_KEY });

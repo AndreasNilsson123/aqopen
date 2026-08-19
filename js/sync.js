@@ -4,7 +4,7 @@
 import { HOLES } from './constants.js';
 import { clone, same } from './utils.js';
 import { migrateState } from './state.js';
-import { canEdit, persistLocalPrefs, store, setCourses } from './store.js';
+import { canEdit, store, setCourses } from './store.js';
 
 const API       = '/api/state';
 const LOCAL_KEY = 'aqopen-state-v2';
@@ -100,7 +100,13 @@ async function push() {
     headers: requestHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ rev: store.rev, state: store.S })
   });
-  if (r.status === 409) return { conflict: true,  doc: await r.json() };
+  if (r.status === 409) {
+    try {
+      return { conflict: true, doc: await r.json() };
+    } catch {
+      throw new Error('PUT 409');
+    }
+  }
   if (!r.ok)            throw new Error(await responseError(r, 'PUT ' + r.status));
   return { conflict: false, doc: await r.json() };
 }
@@ -143,7 +149,6 @@ async function flush() {
 
 export function queueSave() {
   if (!canEdit()) {
-    persistLocalPrefs();
     setStatus(syncedNote(), true);
     return;
   }

@@ -6,6 +6,7 @@ const ASSETS = [
   './css/app.css',
   './courses.json',
   './icons/app.svg',
+  './icons/apple-touch-icon.png',
   './icons/maskable.svg',
   './js/app.js',
   './js/constants.js',
@@ -44,7 +45,7 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
       const copy = res.clone();
-      caches.open(CACHE).then(cache => cache.put(req, copy));
+      caches.open(CACHE).then(cache => cache.put(req, copy)).catch(() => {});
       return res;
     }))
   );
