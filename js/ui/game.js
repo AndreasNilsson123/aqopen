@@ -3,7 +3,7 @@
  */
 import { HOLES, ROUND_LABELS } from '../constants.js';
 import { clamp, fmt, el, esc } from '../utils.js';
-import { store } from '../store.js';
+import { canEdit, store } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
   handicapRoundBonus, stablefordSummary, handicapModeLabel, gm
@@ -31,6 +31,11 @@ function winnerChips(list, onToggle, points) {
 
 export function renderGame() {
   const box = el('<div></div>');
+
+  if (!canEdit()) {
+    box.appendChild(el('<section class="card"><div class="card-body"><p class="notice" style="margin:0">Spelläge är avstängt i visningsläge eller tills redigeringsnyckeln är sparad på den här enheten.</p></div></section>'));
+    return box;
+  }
 
   if (!store.S.players.length) {
     box.appendChild(el('<section class="card"><div class="card-body"><p class="empty-note">Lägg till spelare under Inställningar först.</p></div></section>'));
@@ -82,6 +87,7 @@ export function renderGame() {
   const par  = R.pars[h - 1];
   const isCtp = ruleEnabled('ctp', rid) && R.ctp.includes(h);
   const isLd  = ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(h);
+  const missingPlayers = store.S.players.filter(p => arr(rid, p.id)[h - 1] == null);
 
   const head = el(
     '<section class="card">' +
@@ -97,6 +103,10 @@ export function renderGame() {
           '</div>' +
         '</div>' +
         '<div id="gp"></div>' +
+        '<div class="legend" style="margin-top:10px">' +
+          '<span><b>' + (store.S.players.length - missingPlayers.length) + '/' + store.S.players.length + '</b> ifyllda på hålet</span>' +
+          '<span><b>' + store.S.players.reduce((n, p) => n + arr(rid, p.id).filter(v => v != null).length, 0) + '/' + (store.S.players.length * HOLES) + '</b> ifyllda i ronden</span>' +
+        '</div>' +
       '</div>' +
     '</section>'
   );
@@ -187,7 +197,7 @@ export function renderGame() {
   head.querySelector('.card-body').appendChild(nav);
 
   const openHoles = store.S.players.some(p => arr(rid, p.id)[h - 1] == null);
-  if (openHoles) head.querySelector('.card-body').appendChild(el('<p class="empty-note" style="margin:10px 0 0">Alla spelare är inte ifyllda på det här hålet.</p>'));
+  if (openHoles) head.querySelector('.card-body').appendChild(el('<p class="empty-note" style="margin:10px 0 0">Saknar score på hålet: ' + esc(missingPlayers.map(p => p.name).join(', ')) + '.</p>'));
   box.appendChild(head);
 
   /* Hole navigator dots */

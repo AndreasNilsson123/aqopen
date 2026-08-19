@@ -72,7 +72,7 @@ nav.tabs::-webkit-scrollbar{display:none}
   background:var(--card);color:var(--muted);cursor:pointer;
 }
 .tab[aria-selected="true"]{background:var(--navy);border-color:var(--navy);color:#fff}
-.tab:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.tab:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 
 /* ---------- cards ---------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:14px}
@@ -164,10 +164,11 @@ tr.done .hno{color:var(--blue)}
 /* ---------- settings ---------- */
 .field{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .field label{width:88px;font-size:12.5px;color:var(--muted)}
-input[type=text],input[type=number],select{
+input[type=text],input[type=password],input[type=number],select,textarea{
   font-family:inherit;font-size:15px;padding:9px 10px;border:1px solid var(--line);
   border-radius:8px;background:#fff;color:var(--ink);width:100%;
 }
+textarea.bulk{min-height:150px;margin-top:10px;resize:vertical}
 .parGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
 .parCell{text-align:center}
 .parCell span{display:block;font-size:11px;color:var(--muted);font-family:"IBM Plex Mono",monospace}
@@ -187,6 +188,16 @@ input[type=text],input[type=number],select{
 }
 .status b{color:#fff}
 .empty-note{color:var(--muted);font-size:13px}
+.notice{
+  border:1px solid var(--line);background:#F9FBFE;color:var(--navy);
+  border-radius:8px;padding:10px 12px;font-size:13px;
+}
+.notice.warn{border-color:#E4C7B7;background:#FFF7F3;color:var(--warn)}
+.notice.good{border-color:#C9DCEF;background:#F5FAFF;color:var(--blue)}
+.readonly-score{
+  display:inline-block;min-width:28px;text-align:right;
+  font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--navy);
+}
 @media (max-width:420px){
   .res{width:78px}
   .par{width:40px}
