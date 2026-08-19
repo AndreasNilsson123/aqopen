@@ -93,6 +93,47 @@ function triggerDownload(filename, content) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function playerDbHeaders(jsonBody = false) {
+  const headers = {};
+  if (jsonBody) headers['Content-Type'] = 'application/json';
+  const key = store.local.editKey.trim();
+  if (key) headers['x-aqopen-key'] = key;
+  return headers;
+}
+
+function hasRecordedScores() {
+  return ROUND_IDS.some(rid =>
+    Object.values(store.S.strokes?.[rid] || {}).some(arr => Array.isArray(arr) && arr.some(v => v != null))
+  );
+}
+
+function withPlayers(players) {
+  return migrateState({
+    ...store.S,
+    players,
+    live: null,
+    snapshots: [],
+    teams: { enabled: false, groups: [], names: [], scoring: 'sum' }
+  });
+}
+
+async function fetchPlayerDatabase() {
+  const r = await fetch('/api/players', { cache: 'no-store', headers: playerDbHeaders() });
+  if (!r.ok) throw new Error('Kunde inte läsa spelardatabasen (' + r.status + ')');
+  const data = await r.json();
+  return Array.isArray(data?.players) ? data.players : [];
+}
+
+async function savePlayerDatabase(players) {
+  const r = await fetch('/api/players', {
+    method: 'PUT',
+    headers: playerDbHeaders(true),
+    body: JSON.stringify({ players })
+  });
+  if (!r.ok) throw new Error('Kunde inte spara spelardatabasen (' + r.status + ')');
+  return r.json();
+}
+
 /* ====================================================================== */
 /* Section builders                                                        */
 /* ====================================================================== */
@@ -430,6 +471,70 @@ function buildHandicapSection(box) {
 function buildPlayersSection(box) {
   const preview = store.S.players.length + ' spelare';
   box.appendChild(section('Spelare', preview, body => {
+    const db = el(
+      '<div class="subcard" style="margin-top:0;margin-bottom:8px">' +
+        '<h4>Spelardatabas</h4>' +
+        '<p style="margin:0 0 8px">Ladda spelare från delat register eller spara nuvarande uppställning dit.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="btn ghost" data-db-load>Ladda från databas</button>' +
+          '<button class="btn ghost" data-db-save>Spara nuvarande spelare</button>' +
+        '</div>' +
+        '<p class="empty-note" data-db-msg style="margin:8px 0 0"></p>' +
+      '</div>'
+    );
+    const loadBtn = db.querySelector('[data-db-load]');
+    const saveBtn = db.querySelector('[data-db-save]');
+    const dbMsg   = db.querySelector('[data-db-msg]');
+    const lockButtons = on => { loadBtn.disabled = on; saveBtn.disabled = on; };
+
+    loadBtn.onclick = async () => {
+      lockButtons(true);
+      dbMsg.textContent = 'Laddar spelare…';
+      try {
+        const list = await fetchPlayerDatabase();
+        if (!list.length) {
+          dbMsg.textContent = 'Spelardatabasen är tom.';
+          return;
+        }
+        if (hasRecordedScores() && !window.confirm('Det finns registrerade slag. Ladda från databasen och ersätta nuvarande spelare?')) {
+          dbMsg.textContent = 'Avbrutet.';
+          return;
+        }
+        const players = list.map((p, i) => {
+          const out = makePlayer(p?.name || ('Spelare ' + (i + 1)));
+          out.handicap = clamp(num(p?.handicap, 0), -36, 54);
+          return out;
+        });
+        store.S = withPlayers(players);
+        save();
+        dbMsg.textContent = 'Laddade ' + players.length + ' spelare från databasen.';
+        setStatus(syncedNote());
+        rerender();
+      } catch (e) {
+        dbMsg.textContent = e.message || 'Kunde inte ladda databasen.';
+      } finally {
+        lockButtons(false);
+      }
+    };
+
+    saveBtn.onclick = async () => {
+      lockButtons(true);
+      dbMsg.textContent = 'Sparar spelardatabas…';
+      try {
+        const payload = store.S.players.map(p => ({
+          name: String(p.name || '').trim(),
+          handicap: clamp(num(p.handicap, 0), -36, 54)
+        })).filter(p => p.name);
+        const res = await savePlayerDatabase(payload);
+        dbMsg.textContent = 'Sparade ' + (res?.count ?? payload.length) + ' spelare i databasen.';
+      } catch (e) {
+        dbMsg.textContent = e.message || 'Kunde inte spara databasen.';
+      } finally {
+        lockButtons(false);
+      }
+    };
+    body.appendChild(db);
+
     store.S.players.forEach((p, i) => {
       const f = el(
         '<div class="subcard" style="margin-top:0;margin-bottom:8px">' +
