@@ -1297,7 +1297,6 @@
     presetSel.onchange = ()=>{
       if(presetSel.value==='custom'){
         touchGamemode();
-        S.gamemode.name = 'Eget upplägg';
       }else{
         S.gamemode = presetConfig(presetSel.value);
       }
@@ -1371,8 +1370,8 @@
       hcp.onchange = ()=>{ p.handicap = clamp(num(hcp.value, 0), -36, 54); save(); render(); };
       del.onclick = ()=>{
         S.players = S.players.filter(x=>x.id!==p.id);
-        ['bana','sim'].forEach(r=>{ delete (S.strokes[r]||{})[p.id]; Object.keys(S.ctpWins[r]).forEach(h=>{ S.ctpWins[r][h]=S.ctpWins[r][h].filter(i=>i!==p.id); if(!S.ctpWins[r][h].length) delete S.ctpWins[r][h]; }); });
-        Object.keys(S.ldWins.sim).forEach(h=>{ S.ldWins.sim[h]=S.ldWins.sim[h].filter(i=>i!==p.id); if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h]; });
+        ['bana','sim'].forEach(r=>{ delete (S.strokes[r]||{})[p.id]; Object.keys(S.ctpWins[r]).forEach(h=>{ S.ctpWins[r][h]=S.ctpWins[r][h].filter(id=>id!==p.id); if(!S.ctpWins[r][h].length) delete S.ctpWins[r][h]; }); });
+        Object.keys(S.ldWins.sim).forEach(h=>{ S.ldWins.sim[h]=S.ldWins.sim[h].filter(id=>id!==p.id); if(!S.ldWins.sim[h].length) delete S.ldWins.sim[h]; });
         save(); render();
       };
       pl.appendChild(f);
