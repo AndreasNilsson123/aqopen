@@ -15,6 +15,7 @@ import { renderConfig }      from './ui/settings.js';
 /* ---- history API client ---- */
 
 let historyCache = null; // list items (no full state)
+let lastRenderedTab = null;
 
 export async function fetchHistoryList() {
   try {
@@ -73,6 +74,7 @@ export function render() {
   document.querySelector('.brand-note').textContent = store.S.event || 'Resultat & poängräkning';
   document.title = (store.S.event || 'AqOpen Sweden') + ' – Scoring';
   if (!canEdit() && store.tab === 'spel') store.tab = 'lb';
+  const tabChanged = store.tab !== lastRenderedTab;
   document.querySelectorAll('.tab').forEach(t => {
     const visible = t.dataset.tab !== 'spel' || canEdit();
     t.hidden = !visible;
@@ -85,7 +87,8 @@ export function render() {
   else if (store.tab === 'cfg')      view.appendChild(renderConfig());
   else                               view.appendChild(renderRound(store.tab));
 
-  window.scrollTo({ top: 0, behavior: 'instant' });
+  if (tabChanged) window.scrollTo({ top: 0, behavior: 'instant' });
+  lastRenderedTab = store.tab;
 }
 
 function esc(s) {
