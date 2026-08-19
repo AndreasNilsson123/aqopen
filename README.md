@@ -107,6 +107,15 @@ Under **Inställningar → Backup & import** you can:
 - import a previous JSON backup
 - restore the latest locally saved pre-reset snapshot
 
+## Player database
+
+Under **Inställningar → Spelare** there is a shared player database:
+
+- **Ladda från databas** replaces the current event players with saved players
+- **Spara nuvarande spelare** stores the current list (name + handicap) for reuse
+
+The data is shared through the Netlify function endpoint `GET/PUT /api/players`.
+
 ## One caveat
 
 Without `AQOPEN_KEY`, the URL is still public and unauthenticated — anyone

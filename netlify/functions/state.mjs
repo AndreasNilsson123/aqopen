@@ -13,12 +13,17 @@ import { getStore } from "@netlify/blobs";
 // DELETE /api/history?index=N  -> { ok: true }
 //
 // GET  /api/audit              -> { entries: [...] }  (edit-key protected)
+//
+// GET  /api/players            -> { players: [...] }
+// PUT  /api/players { players } -> { ok: true, count }
 
 const KEY       = "state";
 const HIST_KEY  = "history";
 const AUDIT_KEY = "audit";
+const PLAYERS_KEY = "players_db";
 const MAX_AUDIT = 500;
 const MAX_HIST  = 50;
+const MAX_PLAYERS = 200;
 
 const EDIT_KEY = process.env.AQOPEN_KEY?.trim() || "";
 
@@ -229,6 +234,42 @@ async function handleAudit(req, store) {
 }
 
 /* ------------------------------------------------------------------ */
+/* /api/players                                                        */
+/* ------------------------------------------------------------------ */
+function sanitizePlayers(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((p) => ({
+      name: String(p?.name || "").trim(),
+      handicap: Number.isFinite(Number(p?.handicap)) ? Number(p.handicap) : 0,
+    }))
+    .filter((p) => p.name)
+    .slice(0, MAX_PLAYERS)
+    .map((p) => ({
+      name: p.name.slice(0, 80),
+      handicap: Math.max(-36, Math.min(54, Math.round(p.handicap * 2) / 2)),
+    }));
+}
+
+async function handlePlayers(req, store) {
+  if (req.method === "GET") {
+    const doc = await store.get(PLAYERS_KEY, { type: "json" });
+    return json({ players: sanitizePlayers(doc?.players) });
+  }
+
+  if (req.method === "PUT") {
+    if (!canWrite(req)) return json({ error: "Edit key required." }, 403);
+    let body;
+    try { body = await req.json(); } catch { return json({ error: "Body must be JSON." }, 400); }
+    const players = sanitizePlayers(body?.players);
+    await store.setJSON(PLAYERS_KEY, { players, updated: new Date().toISOString() });
+    return json({ ok: true, count: players.length });
+  }
+
+  return json({ error: "Use GET or PUT." }, 405);
+}
+
+/* ------------------------------------------------------------------ */
 /* Router                                                               */
 /* ------------------------------------------------------------------ */
 export default async (req) => {
@@ -239,6 +280,7 @@ export default async (req) => {
   if (path === "/api/state")   return handleState(req, store);
   if (path === "/api/history") return handleHistory(req, store);
   if (path === "/api/audit")   return handleAudit(req, store);
+  if (path === "/api/players") return handlePlayers(req, store);
 
   const histMatch = path.match(/^\/api\/history\/([a-z0-9]+)$/);
   if (histMatch) return handleHistoryItem(req, store, histMatch[1]);
@@ -246,4 +288,4 @@ export default async (req) => {
   return json({ error: "Unknown endpoint." }, 404);
 };
 
-export const config = { path: ["/api/state", "/api/history", "/api/history/:id", "/api/audit"] };
+export const config = { path: ["/api/state", "/api/history", "/api/history/:id", "/api/audit", "/api/players"] };
