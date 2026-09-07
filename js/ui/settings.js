@@ -798,14 +798,14 @@ function buildRoundSection(rid, box) {
 
     if ((store.S.customCourses || []).length) {
       const own = el('<div style="margin-top:12px"><h3 class="sec">Egna banor</h3></div>');
-      store.S.customCourses.forEach(course => {
+      store.S.customCourses.forEach((course, courseIndex) => {
         const line = el(
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line)">' +
             '<span style="font-size:13.5px">' + esc(course.name) + ' <span class="empty-note">par ' + course.pars.reduce((a, b) => a + b, 0) + '</span></span>' +
           '</div>'
         );
         const del = el('<button class="btn danger" style="padding:6px 10px">Ta bort</button>');
-        setFocusKey(del, 'round:' + rid + ':custom:' + course.name + ':delete');
+        setFocusKey(del, 'round:' + rid + ':custom:' + courseIndex + ':delete');
         del.onclick = () => {
           store.S.customCourses = store.S.customCourses.filter(x => x.name !== course.name);
           save(); rerender();
