@@ -151,9 +151,11 @@ export function renderGame() {
 
   /* Combined prize winner */
   if (hasPrize) {
-    const cur = store.S.ldCtpWins[rid][h] || [];
+    const cur = store.S.ldCtpWins?.[rid]?.[h] || [];
     const w   = el('<div class="subcard"><h4>Longest Drive / CTP</h4><p>Kombinerad bonus på varje hål. ' + fmt(ldCtpPoints()) + ' poäng delas vid lika.</p></div>');
     w.appendChild(winnerChips(cur, pid => {
+      if (!store.S.ldCtpWins) store.S.ldCtpWins = { bana: {}, sim: {} };
+      if (!store.S.ldCtpWins[rid]) store.S.ldCtpWins[rid] = {};
       const l = new Set(store.S.ldCtpWins[rid][h] || []);
       l.has(pid) ? l.delete(pid) : l.add(pid);
       store.S.ldCtpWins[rid][h] = [...l];
