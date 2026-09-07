@@ -29,8 +29,7 @@ function scoreSegments(r = {}) {
   const hcp = Number(r.hcp ?? 0);
   return [
     { cls: 's-stable', label: 'Stableford', value: Math.max(0, (r.stableBana ?? 0) + (r.stableSim ?? 0)) },
-    { cls: 's-ctp',    label: 'CTP',        value: Math.max(0, r.ctp ?? 0) },
-    { cls: 's-ld',     label: 'Drive',      value: Math.max(0, r.ld ?? 0) },
+    { cls: 's-ctp',    label: 'LD / CTP',   value: Math.max(0, r.ldctp ?? 0) },
     { cls: 's-tri',    label: 'Bonus',      value: Math.max(0, r.tri ?? 0) },
     { cls: 's-cb',     label: 'Comeback',   value: Math.max(0, r.cb ?? 0) },
     { cls: 's-hcp',    label: 'Handicap',   value: Math.max(0, hcp) },
@@ -106,8 +105,7 @@ export function renderStandings(players, res, opts = {}) {
             '<span>Klart <b>' + (banaStats.filled + simStats.filled) + '/36</b></span>' +
             '<span>Bana <b>' + fmt(r.stableBana ?? 0) + '</b></span>' +
             '<span>Sim <b>'  + fmt(r.stableSim  ?? 0) + '</b></span>' +
-            '<span>CTP <b>'  + fmt(r.ctp ?? 0)         + '</b></span>' +
-            '<span>Drive <b>'+ fmt(r.ld ?? 0)           + '</b></span>' +
+            '<span>LD / CTP <b>' + fmt(r.ldctp ?? 0)    + '</b></span>' +
             '<span>Bonus <b>'+ fmt((r.tri ?? 0) + (r.cb ?? 0))   + '</b></span>' +
             '<span>Handicap <b>' + fmt(r.hcp ?? 0)      + '</b></span>' +
           '</div>' +
@@ -208,8 +206,7 @@ export function renderLeaderboard() {
             '<span>Klart <b>' + (banaStats.filled + simStats.filled) + '/36</b></span>' +
             '<span>Bana <b>' + fmt(r.stableBana) + '</b></span>' +
             '<span>Sim <b>'  + fmt(r.stableSim)  + '</b></span>' +
-            '<span>CTP <b>'  + fmt(r.ctp)         + '</b></span>' +
-            '<span>Drive <b>'+ fmt(r.ld)           + '</b></span>' +
+            '<span>LD / CTP <b>' + fmt(r.ldctp)    + '</b></span>' +
             '<span>Bonus <b>'+ fmt(r.tri + r.cb)   + '</b></span>' +
             '<span>Handicap <b>' + fmt(r.hcp)      + '</b></span>' +
           '</div>' +
@@ -221,8 +218,7 @@ export function renderLeaderboard() {
   body.appendChild(el(
     '<div class="legend" style="margin-top:14px">' +
       '<span><i class="swatch s-stable"></i>Stableford</span>' +
-      '<span><i class="swatch s-ctp"></i>Closest to pin</span>' +
-      '<span><i class="swatch s-ld"></i>Längsta drive</span>' +
+      '<span><i class="swatch s-ctp"></i>Longest Drive / CTP</span>' +
       '<span><i class="swatch s-tri"></i>Bonusar</span>' +
       '<span><i class="swatch s-cb"></i>Comeback</span>' +
       '<span><i class="swatch s-hcp"></i>Handicap</span>' +
@@ -287,8 +283,7 @@ export function renderLeaderboard() {
   const dp   = el('<section class="card"><div class="card-head light">Priser &amp; push</div><div class="card-body" id="dp"></div></section>');
   const d    = dp.querySelector('#dp');
   const rows = [];
-  if (ruleEnabled('ctp'))      rows.push(['Closest to pin', r => r.ctp]);
-  if (ruleEnabled('ld'))       rows.push(['Längsta drive',  r => r.ld]);
+  if (ruleEnabled('ldctp'))    rows.push(['Longest Drive / CTP', r => r.ldctp]);
   if (ruleEnabled('clean'))    rows.push(['Ren rond',       r => r.tri]);
   if (ruleEnabled('comeback')) rows.push(['Comeback',       r => r.cb]);
 

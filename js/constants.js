@@ -1,5 +1,5 @@
 export const HOLES = 18;
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const ROUND_IDS = ['bana', 'sim'];
 export const ROUND_LABELS = { bana: 'Bana (ute)', sim: 'Simulator' };
 
@@ -18,8 +18,7 @@ export const PRESET_LIBRARY = {
     name: 'AqOpen Classic',
     stableford: { eaglePlus: 12, birdie: 6, par: 3, bogey: 2, double: 1, triple: 0 },
     bonuses: {
-      ctp:      { enabled: true,  points: 5,  rounds: { bana: true,  sim: true  } },
-      ld:       { enabled: true,  points: 5,  rounds: { bana: false, sim: true  } },
+      ldctp:    { enabled: true,  points: 1,  rounds: { bana: true,  sim: true  } },
       clean:    { enabled: true,  points: 5,  rounds: { bana: true,  sim: true  } },
       comeback: { enabled: true,  points: 10 }
     },
@@ -31,8 +30,7 @@ export const PRESET_LIBRARY = {
     name: 'Enkel Stableford',
     stableford: { eaglePlus: 5, birdie: 4, par: 3, bogey: 2, double: 1, triple: 0 },
     bonuses: {
-      ctp:      { enabled: false, points: 3, rounds: { bana: true,  sim: false } },
-      ld:       { enabled: false, points: 3, rounds: { bana: false, sim: true  } },
+      ldctp:    { enabled: false, points: 1, rounds: { bana: true,  sim: true  } },
       clean:    { enabled: false, points: 3, rounds: { bana: true,  sim: true  } },
       comeback: { enabled: false, points: 5 }
     },

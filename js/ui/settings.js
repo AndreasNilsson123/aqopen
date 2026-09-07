@@ -13,7 +13,7 @@ import {
 } from '../store.js';
 import {
   gm, ruleEnabled, ruleCfg, gamemodeLines, stablefordSummary,
-  handicapModeLabel, handicapAppliesLabel, tiebreakLabel
+  handicapModeLabel, handicapAppliesLabel, tiebreakLabel, ldCtpEligibleHoles
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
@@ -34,6 +34,13 @@ function touchGamemode() {
 
 function fixHoleChoices(rid) {
   fixHoleChoicesState(store.S, rid);
+}
+
+export function ldCtpRoundNote(round) {
+  const holes = ldCtpEligibleHoles(round);
+  return holes.length === HOLES
+    ? 'Longest Drive / CTP används automatiskt på alla 18 hål i den här ronden. Vinnare markeras hål för hål i scorevyn eller spelläget.'
+    : 'Den här tävlingen behåller tidigare bonushål för Longest Drive / CTP: hål ' + holes.join(', ') + '.';
 }
 
 function applyCourse(rid, course) {
@@ -69,9 +76,7 @@ function warnings() {
   ROUND_IDS.forEach(rid => {
     const round = store.S.rounds[rid];
     if (!round.courseName.trim()) out.push(round.label + ' saknar valt ban-namn.');
-    if (ruleEnabled('ctp', rid) && !round.ctp.length) out.push(round.label + ' har CTP aktiverat men inga CTP-hål valda.');
   });
-  if (ruleEnabled('ld', 'sim') && !store.S.rounds.sim.ld.length) out.push('Simulatorn har längsta drive aktiverat men inga drivehål valda.');
   return out;
 }
 
@@ -196,7 +201,7 @@ function buildValidationSection(box) {
   const preview = items.length ? items.length + ' behöver ses över' : 'Redo att spela';
   box.appendChild(section('Snabbcheck', preview, body => {
     if (!items.length) {
-      body.appendChild(el('<p class="notice good" style="margin:0">Grundinställningarna ser bra ut: spelare, bonushål och åtkomst är redo.</p>'));
+      body.appendChild(el('<p class="notice good" style="margin:0">Grundinställningarna ser bra ut: spelare, bonusregler och åtkomst är redo.</p>'));
       return;
     }
     body.appendChild(el('<p class="empty-note" style="margin:0 0 10px">Fixa gärna det här innan ni börjar eller delar sidan brett.</p>'));
@@ -397,8 +402,7 @@ function buildStablefordSection(box) {
 
 function buildBonusSection(box) {
   const bonusDefs = [
-    ['ctp',      'Closest to pin', ['bana', 'sim']],
-    ['ld',       'Längsta drive',  ['sim']],
+    ['ldctp',    'Longest Drive / CTP', []],
     ['clean',    'Ren rond',       ['bana', 'sim']],
     ['comeback', 'Comeback',       []]
   ];
@@ -414,14 +418,17 @@ function buildBonusSection(box) {
             '<strong style="font-size:14px">' + label + '</strong>' +
             '<button class="chip blue" aria-pressed="' + rule.enabled + '">' + (rule.enabled ? 'På' : 'Av') + '</button>' +
           '</div>' +
-          '<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>' +
           '<div class="chips bonus-rounds"></div>' +
         '</div>'
       );
       card.querySelector('button').onclick = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); rerender(); };
-      card.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
       const chips = card.querySelector('.bonus-rounds');
-      if (rounds.length) {
+      if (key === 'ldctp') {
+        chips.appendChild(el('<span class="empty-note">Fast: 1 poäng per hål i båda ronderna. Äldre pågående tävlingar kan behålla tidigare bonushål tills de nollställs.</span>'));
+      } else if (rounds.length) {
+        const pointsRow = el('<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>');
+        pointsRow.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
+        card.insertBefore(pointsRow, chips);
         rounds.forEach(rid => {
           const chip = el('<button class="chip" aria-pressed="' + rule.rounds[rid] + '">' + ROUND_LABELS[rid] + '</button>');
           chip.onclick = () => {
@@ -432,6 +439,9 @@ function buildBonusSection(box) {
           chips.appendChild(chip);
         });
       } else {
+        const pointsRow = el('<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>');
+        pointsRow.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
+        card.insertBefore(pointsRow, chips);
         chips.appendChild(el('<span class="empty-note">Jämför alltid bana mot simulator.</span>'));
       }
       body.appendChild(card);
@@ -554,14 +564,10 @@ function buildPlayersSection(box) {
         store.S.players = store.S.players.filter(x => x.id !== p.id);
         ['bana', 'sim'].forEach(r => {
           delete (store.S.strokes[r] || {})[p.id];
-          Object.keys(store.S.ctpWins[r]).forEach(h => {
-            store.S.ctpWins[r][h] = store.S.ctpWins[r][h].filter(id => id !== p.id);
-            if (!store.S.ctpWins[r][h].length) delete store.S.ctpWins[r][h];
+          Object.keys(store.S.ldCtpWins?.[r] || {}).forEach(h => {
+            store.S.ldCtpWins[r][h] = store.S.ldCtpWins[r][h].filter(id => id !== p.id);
+            if (!store.S.ldCtpWins[r][h].length) delete store.S.ldCtpWins[r][h];
           });
-        });
-        Object.keys(store.S.ldWins.sim).forEach(h => {
-          store.S.ldWins.sim[h] = store.S.ldWins.sim[h].filter(id => id !== p.id);
-          if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
         });
         save(); rerender();
       };
@@ -685,34 +691,8 @@ function buildRoundSection(rid, box) {
     });
     body.appendChild(grid);
 
-    const par3 = R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p === 3).map(x => x.h);
-    body.appendChild(el('<h3 class="sec" style="margin-top:18px">Closest to pin – välj hål</h3>'));
-    const ctpRow = el('<div class="chips"></div>');
-    (par3.length ? par3 : R.pars.map((_, i) => i + 1)).forEach(h => {
-      const b = el('<button class="chip blue" aria-pressed="' + R.ctp.includes(h) + '">Hål ' + h + '</button>');
-      b.onclick = () => {
-        const on = R.ctp.includes(h);
-        R.ctp = on ? R.ctp.filter(x => x !== h) : [...R.ctp, h].sort((a, b) => a - b);
-        save(); rerender();
-      };
-      ctpRow.appendChild(b);
-    });
-    body.appendChild(ctpRow);
-    body.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + (par3.length ? 'Visar bara par 3-hål.' : 'Inga par 3-hål inlagda ännu – välj par först.') + '</p>'));
-
-    if (rid === 'sim') {
-      body.appendChild(el('<h3 class="sec" style="margin-top:18px">Längsta drive – välj hål</h3>'));
-      const ldRow = el('<div class="chips"></div>');
-      R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p >= 4).forEach(x => {
-        const b = el('<button class="chip blue" aria-pressed="' + R.ld.includes(x.h) + '">Hål ' + x.h + '</button>');
-        b.onclick = () => {
-          const on = R.ld.includes(x.h);
-          R.ld = on ? R.ld.filter(y => y !== x.h) : [...R.ld, x.h].sort((a, b) => a - b);
-          save(); rerender();
-        };
-        ldRow.appendChild(b);
-      });
-      body.appendChild(ldRow);
+    if (ruleEnabled('ldctp', rid)) {
+      body.appendChild(el('<p class="empty-note" style="margin:18px 0 0">' + esc(ldCtpRoundNote(R)) + '</p>'));
     }
   }));
 }
@@ -722,7 +702,7 @@ function buildResetSection(box) {
     '<div class="card" style="border-color:#C48B7A">' +
       '<div class="card-body">' +
         '<h3 class="sec" style="color:var(--warn)">Nollställ</h3>' +
-        '<p class="empty-note" style="margin:0 0 10px">Tar bort alla slag, CTP- och drivemarkeringar. Spelare, handicap och spelformat behålls. En lokal reset-backup sparas först.</p>' +
+        '<p class="empty-note" style="margin:0 0 10px">Tar bort alla slag och Longest Drive / CTP-markeringar. Spelare, handicap och spelformat behålls. En lokal reset-backup sparas först.</p>' +
         '<button class="btn danger">Nollställ alla resultat</button>' +
       '</div>' +
     '</div>'
@@ -733,8 +713,7 @@ function buildResetSection(box) {
     btn.onclick     = () => {
       saveResetBackup(clone(store.S));
       store.S.strokes   = { bana: {}, sim: {} };
-      store.S.ctpWins   = { bana: {}, sim: {} };
-      store.S.ldWins    = { sim: {} };
+      store.S.ldCtpWins = { bana: {}, sim: {} };
       store.S.live      = null;
       store.S.snapshots = [];
       save(); rerender();

@@ -6,7 +6,7 @@ import { fmt, el, esc } from '../utils.js';
 import { canEdit, store, allCourses } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus, compute, recordSnapshot
+  handicapRoundBonus, compute, recordSnapshot, ldCtpPoints, ldCtpEligibleHoles
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -23,6 +23,7 @@ function winnerNames(ids = []) {
 
 export function renderRound(rid) {
   const R   = store.S.rounds[rid];
+  const prizeHoles = ldCtpEligibleHoles(R);
   const box = el('<div></div>');
 
   if (!store.S.players.length) {
@@ -84,8 +85,7 @@ export function renderRound(rid) {
     const hn    = holeNames[i]   ? '<span style="font-size:10px;color:var(--muted);display:block;line-height:1.2">' + esc(holeNames[i]) + '</span>' : '';
     const si    = strokeIndex[i] ? '<span class="tag" style="background:#F0F4F8;color:var(--muted)">SI ' + strokeIndex[i] + '</span>' : '';
     const tags  =
-      (ruleEnabled('ctp', rid) && R.ctp.includes(i + 1) ? '<span class="tag">CTP</span>' : '') +
-      (ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(i + 1) ? '<span class="tag">LD</span>' : '') +
+      (ruleEnabled('ldctp', rid) && prizeHoles.includes(i + 1) ? '<span class="tag">LD / CTP</span>' : '') +
       si;
 
     const scoreCell = canEdit()
@@ -151,25 +151,25 @@ export function renderRound(rid) {
   if (hcpRound) sc.querySelector('.card-body').appendChild(el('<p class="empty-note" style="margin:8px 0 0">Handicap i den här ronden: ' + fmt(hcpRound) + ' p.</p>'));
   box.appendChild(sc);
 
-  if (ruleEnabled('ctp', rid)) {
-    const ctp = el('<section class="card"><div class="card-head light">Closest to pin</div><div class="card-body" id="cb"></div></section>');
-    const cb  = ctp.querySelector('#cb');
-    cb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera den som ligger närmast hål. Flera markerade delar på ' + fmt(ruleCfg('ctp').points) + ' poäng.' : 'Visar vem som just nu är markerad som närmast hål.') + '</p>'));
-    if (!R.ctp.length) cb.appendChild(el('<p class="empty-note">Inga CTP-hål valda för den här ronden. Välj dem under Inställningar.</p>'));
+  if (ruleEnabled('ldctp', rid)) {
+    const prize = el('<section class="card"><div class="card-head light">Longest Drive / CTP</div><div class="card-body" id="pb"></div></section>');
+    const pb    = prize.querySelector('#pb');
+    const everyHole = prizeHoles.length === HOLES;
+    pb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera vinnaren i den kombinerade Longest Drive / CTP-bonusen ' + (everyHole ? 'på varje hål' : 'på varje bonushål') + '. Flera markerade delar på ' + fmt(ldCtpPoints()) + ' poäng.' : 'Visar vem som just nu är markerad som vinnare i den kombinerade Longest Drive / CTP-bonusen ' + (everyHole ? 'på varje hål.' : 'på varje bonushål.')) + '</p>'));
 
-    R.ctp.forEach(h => {
-      const wrap = el('<div class="subcard"><h4>Hål ' + h + ' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par ' + R.pars[h - 1] + '</span></h4><div class="chips" id="c' + h + '"></div></div>');
-      const row  = wrap.querySelector('#c' + h);
-      const cur  = store.S.ctpWins[rid][h] || [];
+    prizeHoles.forEach(h => {
+      const wrap = el('<div class="subcard"><h4>Hål ' + h + ' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par ' + R.pars[h - 1] + '</span></h4><div class="chips" id="p' + h + '"></div></div>');
+      const row  = wrap.querySelector('#p' + h);
+      const cur  = store.S.ldCtpWins[rid][h] || [];
       if (canEdit()) {
         store.S.players.forEach(p => {
           const on = cur.includes(p.id);
           const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
           c.onclick = () => {
-            const list = new Set(store.S.ctpWins[rid][h] || []);
+            const list = new Set(store.S.ldCtpWins[rid][h] || []);
             list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-            store.S.ctpWins[rid][h] = [...list];
-            if (!store.S.ctpWins[rid][h].length) delete store.S.ctpWins[rid][h];
+            store.S.ldCtpWins[rid][h] = [...list];
+            if (!store.S.ldCtpWins[rid][h].length) delete store.S.ldCtpWins[rid][h];
             save(); rerender();
           };
           row.appendChild(c);
@@ -177,42 +177,10 @@ export function renderRound(rid) {
       } else {
         row.appendChild(el('<span class="empty-note">' + esc(winnerNames(cur) || 'Ingen vinnare markerad ännu') + '</span>'));
       }
-      if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ruleCfg('ctp').points / cur.length) + ' poäng var.</p>'));
-      cb.appendChild(wrap);
+      if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ldCtpPoints() / cur.length) + ' poäng var.</p>'));
+      pb.appendChild(wrap);
     });
-    box.appendChild(ctp);
-  }
-
-  if (rid === 'sim' && ruleEnabled('ld', 'sim')) {
-    const ld  = el('<section class="card"><div class="card-head light">Längsta drive</div><div class="card-body" id="ldb"></div></section>');
-    const ldb = ld.querySelector('#ldb');
-    ldb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Slaget måste landa på fairway. ' + fmt(ruleCfg('ld').points) + ' poäng per hål, delas vid lika.' : 'Visar vem som just nu är markerad som längsta drive.') + '</p>'));
-    if (!R.ld.length) ldb.appendChild(el('<p class="empty-note">Inga drivehål valda. Välj dem under Inställningar.</p>'));
-
-    R.ld.forEach(h => {
-      const wrap = el('<div class="subcard"><h4>Hål ' + h + '</h4><div class="chips" id="ld' + h + '"></div></div>');
-      const row  = wrap.querySelector('#ld' + h);
-      const cur  = store.S.ldWins.sim[h] || [];
-      if (canEdit()) {
-        store.S.players.forEach(p => {
-          const on = cur.includes(p.id);
-          const c  = el('<button class="chip blue" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
-          c.onclick = () => {
-            const list = new Set(store.S.ldWins.sim[h] || []);
-            list.has(p.id) ? list.delete(p.id) : list.add(p.id);
-            store.S.ldWins.sim[h] = [...list];
-            if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
-            save(); rerender();
-          };
-          row.appendChild(c);
-        });
-      } else {
-        row.appendChild(el('<span class="empty-note">' + esc(winnerNames(cur) || 'Ingen vinnare markerad ännu') + '</span>'));
-      }
-      if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ruleCfg('ld').points / cur.length) + ' poäng var.</p>'));
-      ldb.appendChild(wrap);
-    });
-    box.appendChild(ld);
+    box.appendChild(prize);
   }
 
   return box;

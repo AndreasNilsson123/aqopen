@@ -37,7 +37,16 @@ export function handicapAppliesLabel(appliesTo) {
 }
 
 export function rulePrizeLabel(key) {
-  return ({ ctp: 'Closest to pin', ld: 'Längsta drive', clean: 'Ren rond', comeback: 'Comeback' }[key] || key);
+  return ({ ldctp: 'Longest Drive / CTP', clean: 'Ren rond', comeback: 'Comeback' }[key] || key);
+}
+
+export function ldCtpPoints() {
+  return 1;
+}
+
+export function ldCtpEligibleHoles(round) {
+  if (Array.isArray(round?.ldCtpHoles) && round.ldCtpHoles.length) return round.ldCtpHoles;
+  return Array.from({ length: HOLES }, (_, i) => i + 1);
 }
 
 export function tiebreakLabel(value) {
@@ -59,14 +68,9 @@ export function stablefordSummary(mode = gm()) {
 export function gamemodeLines(mode = gm()) {
   const lines = ['Stableford: ' + stablefordSummary(mode) + '.'];
 
-  if (ruleEnabled('ctp')) {
-    const c      = ruleCfg('ctp');
-    const rounds = ROUND_IDS.filter(rid => c.rounds[rid]).map(rid => ROUND_LABELS[rid]).join(', ');
-    lines.push('Closest to pin: ' + fmt(c.points) + ' poäng på ' + rounds.toLowerCase() + '.');
-  }
-  if (ruleEnabled('ld')) {
-    const l = ruleCfg('ld');
-    lines.push('Längsta drive: ' + fmt(l.points) + ' poäng på simulatorhål.');
+  if (ruleEnabled('ldctp')) {
+    const allHoles = ROUND_IDS.every(rid => !ruleEnabled('ldctp', rid) || ldCtpEligibleHoles(store.S.rounds?.[rid]).length === HOLES);
+    lines.push('Longest Drive / CTP: ' + fmt(ldCtpPoints()) + ' poäng ' + (allHoles ? 'på varje hål.' : 'på tävlingens markerade bonushål.'));
   }
   if (ruleEnabled('clean')) {
     const cl     = ruleCfg('clean');
@@ -357,7 +361,7 @@ export function computeFromRaw(state) {
     res[p.id] = {
       stableBana: stats.bana[p.id].sum,
       stableSim:  stats.sim[p.id].sum,
-      ctp: 0, ld: 0, tri: 0, cb: 0,
+      ldctp: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
       cleanBana: false, cleanSim: false, delta: null, badges: [], tb: 0
     };
@@ -374,22 +378,16 @@ export function computeFromRaw(state) {
     r.hcp      = r.hcpBana + r.hcpSim + r.hcpEvent;
   });
 
-  if (_ruleEnabled('ctp')) {
+  if (_ruleEnabled('ldctp')) {
     ROUND_IDS.forEach(rid => {
-      if (!_ruleEnabled('ctp', rid)) return;
-      const wins = state.ctpWins?.[rid] || {};
+      if (!_ruleEnabled('ldctp', rid)) return;
+      const wins = state.ldCtpWins?.[rid] || {};
+      const eligible = new Set(ldCtpEligibleHoles(state.rounds?.[rid]));
       Object.keys(wins).forEach(h => {
-        const add = splitPoints(wins[h], mode.bonuses.ctp.points);
-        Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ctp += add[pid]; });
+        if (!eligible.has(+h)) return;
+        const add = splitPoints(wins[h], ldCtpPoints());
+        Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ldctp += add[pid]; });
       });
-    });
-  }
-
-  if (_ruleEnabled('ld', 'sim')) {
-    const wins = state.ldWins?.sim || {};
-    Object.keys(wins).forEach(h => {
-      const add = splitPoints(wins[h], mode.bonuses.ld.points);
-      Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ld += add[pid]; });
     });
   }
 
@@ -405,7 +403,7 @@ export function computeFromRaw(state) {
 
   state.players.forEach(p => {
     const r = res[p.id];
-    r.total = r.stableBana + r.stableSim + r.ctp + r.ld + r.tri + r.cb + r.hcp;
+    r.total = r.stableBana + r.stableSim + r.ldctp + r.tri + r.cb + r.hcp;
   });
 
   return res;
@@ -421,7 +419,7 @@ export function compute() {
     res[p.id] = {
       stableBana: stats.bana[p.id].sum,
       stableSim:  stats.sim[p.id].sum,
-      ctp: 0, ld: 0, tri: 0, cb: 0,
+      ldctp: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
       cleanBana: false, cleanSim: false, delta: null, badges: [],
       tb: 0
@@ -439,22 +437,16 @@ export function compute() {
     r.hcp      = r.hcpBana + r.hcpSim + r.hcpEvent;
   });
 
-  if (ruleEnabled('ctp')) {
+  if (ruleEnabled('ldctp')) {
     ['bana', 'sim'].forEach(rid => {
-      if (!ruleEnabled('ctp', rid)) return;
-      const wins = store.S.ctpWins[rid] || {};
+      if (!ruleEnabled('ldctp', rid)) return;
+      const wins = store.S.ldCtpWins[rid] || {};
+      const eligible = new Set(ldCtpEligibleHoles(store.S.rounds[rid]));
       Object.keys(wins).forEach(h => {
-        const add = splitPoints(wins[h], ruleCfg('ctp').points);
-        Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ctp += add[pid]; });
+        if (!eligible.has(+h)) return;
+        const add = splitPoints(wins[h], ldCtpPoints());
+        Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ldctp += add[pid]; });
       });
-    });
-  }
-
-  if (ruleEnabled('ld', 'sim')) {
-    const wins = store.S.ldWins.sim || {};
-    Object.keys(wins).forEach(h => {
-      const add = splitPoints(wins[h], ruleCfg('ld').points);
-      Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ld += add[pid]; });
     });
   }
 
@@ -480,7 +472,7 @@ export function compute() {
     }
     res[p.id].live  = { holes: n, delta: n ? ds - db : null, bana: db, sim: ds };
     res[p.id].total = res[p.id].stableBana + res[p.id].stableSim +
-                      res[p.id].ctp + res[p.id].ld + res[p.id].tri +
+                      res[p.id].ldctp + res[p.id].tri +
                       res[p.id].cb + res[p.id].hcp;
   });
 

@@ -1,6 +1,17 @@
 import { HOLES, SCHEMA_VERSION, ROUND_IDS, PRESET_LIBRARY, TIEBREAK_OPTIONS } from './constants.js';
 import { clone, uid, clamp, num } from './utils.js';
 
+function allHoleNumbers() {
+  return Array.from({ length: HOLES }, (_, i) => i + 1);
+}
+
+function sanitizeHoleList(list, fallback = allHoleNumbers()) {
+  const clean = Array.isArray(list)
+    ? [...new Set(list.map(v => clamp(parseInt(v, 10) || 0, 1, HOLES)).filter(Boolean))].sort((a, b) => a - b)
+    : [];
+  return clean.length ? clean : [...fallback];
+}
+
 export function makePlayer(name) {
   return { id: uid(), name, handicap: 0 };
 }
@@ -17,15 +28,14 @@ export function defaultState() {
     event: 'AqOpen Sweden',
     players: names.map(makePlayer),
     rounds: {
-      bana: { label: 'Bana (ute)',  courseName: '', pars: [...pars], ctp: [3,12], ld: []    },
-      sim:  { label: 'Simulator',   courseName: '', pars: [...pars], ctp: [7,16], ld: [5,14] }
+      bana: { label: 'Bana (ute)',  courseName: '', pars: [...pars], ldCtpHoles: allHoleNumbers() },
+      sim:  { label: 'Simulator',   courseName: '', pars: [...pars], ldCtpHoles: allHoleNumbers() }
     },
     gamemode: presetConfig('aqopen'),
     live: null,
     customCourses: [],
     strokes:  { bana: {}, sim: {} },
-    ctpWins:  { bana: {}, sim: {} },
-    ldWins:   { sim: {} },
+    ldCtpWins: { bana: {}, sim: {} },
     teams:     { enabled: false, groups: [], names: [] },
     snapshots: []
   };
@@ -47,8 +57,7 @@ export function sanitizeRound(round, fallback) {
     label:      typeof src.label === 'string' && src.label.trim() ? src.label.trim() : fallback.label,
     courseName: typeof src.courseName === 'string' ? src.courseName : '',
     pars:       Array.from({ length: HOLES }, (_, i) => clamp(num(pars[i], fallback.pars[i] || 4), 3, 6)),
-    ctp: Array.isArray(src.ctp) ? src.ctp.map(v => clamp(parseInt(v, 10) || 0, 1, HOLES)).filter(Boolean) : [...fallback.ctp],
-    ld:  Array.isArray(src.ld)  ? src.ld.map(v  => clamp(parseInt(v, 10) || 0, 1, HOLES)).filter(Boolean) : [...fallback.ld]
+    ldCtpHoles: sanitizeHoleList(src.ldCtpHoles, fallback.ldCtpHoles)
   };
 }
 
@@ -76,6 +85,45 @@ export function sanitizeWinnerMap(map, players) {
   return out;
 }
 
+function mergeWinnerMaps(...maps) {
+  const out = {};
+  maps.forEach(map => {
+    Object.entries(map || {}).forEach(([hole, ids]) => {
+      const merged = [...new Set([...(out[hole] || []), ...(ids || [])])];
+      if (merged.length) out[hole] = merged;
+    });
+  });
+  return out;
+}
+
+function combinedWinnerMaps(src, players) {
+  const direct = {
+    bana: sanitizeWinnerMap(src.ldCtpWins?.bana, players),
+    sim:  sanitizeWinnerMap(src.ldCtpWins?.sim,  players)
+  };
+  const legacyCtp = {
+    bana: sanitizeWinnerMap(src.ctpWins?.bana, players),
+    sim:  sanitizeWinnerMap(src.ctpWins?.sim,  players)
+  };
+  const legacyLd = {
+    bana: {},
+    sim: sanitizeWinnerMap(src.ldWins?.sim, players)
+  };
+  return {
+    bana: mergeWinnerMaps(direct.bana, legacyCtp.bana),
+    sim:  mergeWinnerMaps(direct.sim, legacyCtp.sim, legacyLd.sim)
+  };
+}
+
+function legacyPrizeHoles(round, fallback, rid) {
+  const configured = sanitizeHoleList([
+    ...(Array.isArray(round?.ldCtpHoles) ? round.ldCtpHoles : []),
+    ...(Array.isArray(round?.ctp) ? round.ctp : []),
+    ...(rid === 'sim' && Array.isArray(round?.ld) ? round.ld : [])
+  ], []);
+  return configured.length ? configured : [...fallback];
+}
+
 const VALID_TIEBREAKS = new Set(TIEBREAK_OPTIONS.map(o => o.value));
 
 export function normalizeGamemode(raw) {
@@ -91,7 +139,16 @@ export function normalizeGamemode(raw) {
   });
 
   const bonuses = src.bonuses || {};
-  ['ctp', 'ld', 'clean'].forEach(key => {
+  const ldCtp = bonuses.ldctp || {};
+  const legacyCtp = bonuses.ctp || {};
+  const legacyLd  = bonuses.ld  || {};
+  gm.bonuses.ldctp.enabled = ldCtp.enabled != null
+    ? !!ldCtp.enabled
+    : (legacyCtp.enabled != null ? !!legacyCtp.enabled : (legacyLd.enabled != null ? !!legacyLd.enabled : gm.bonuses.ldctp.enabled));
+  gm.bonuses.ldctp.points = 1;
+  gm.bonuses.ldctp.rounds = { bana: true, sim: true };
+
+  ['clean'].forEach(key => {
     const current = bonuses[key] || {};
     gm.bonuses[key].enabled = current.enabled == null ? gm.bonuses[key].enabled : !!current.enabled;
     gm.bonuses[key].points  = clamp(num(current.points, gm.bonuses[key].points), -50, 50);
@@ -170,21 +227,10 @@ export function sanitizeSnapshots(snapshots) {
 }
 
 export function fixHoleChoicesState(state, rid) {
-  const R    = state.rounds[rid];
-  const par3 = R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p === 3).map(x => x.h);
-  R.ctp = [...new Set(R.ctp.filter(h => par3.includes(h)))];
-  par3.forEach(h => { if (R.ctp.length < 2 && !R.ctp.includes(h)) R.ctp.push(h); });
-  R.ctp.sort((a, b) => a - b);
-
-  if (rid === 'sim') {
-    const long = R.pars.map((p, i) => ({ p, h: i + 1 })).filter(x => x.p >= 4);
-    R.ld = [...new Set(R.ld.filter(h => long.some(x => x.h === h)))];
-    long.filter(x => x.p === 5).forEach(x => { if (R.ld.length < 2 && !R.ld.includes(x.h)) R.ld.push(x.h); });
-    R.ld.sort((a, b) => a - b);
-  }
-
-  Object.keys(state.ctpWins[rid]).forEach(h => { if (!R.ctp.includes(+h)) delete state.ctpWins[rid][h]; });
-  if (rid === 'sim') Object.keys(state.ldWins.sim).forEach(h => { if (!R.ld.includes(+h)) delete state.ldWins.sim[h]; });
+  const wins = state.ldCtpWins?.[rid] || {};
+  Object.keys(wins).forEach(h => {
+    if (!(+h >= 1 && +h <= HOLES)) delete wins[h];
+  });
 }
 
 export function migrateState(raw) {
@@ -208,16 +254,14 @@ export function migrateState(raw) {
       bana: sanitizeStrokeBucket(src.strokes?.bana, players.length ? players : base.players),
       sim:  sanitizeStrokeBucket(src.strokes?.sim,  players.length ? players : base.players)
     },
-    ctpWins: {
-      bana: sanitizeWinnerMap(src.ctpWins?.bana, players.length ? players : base.players),
-      sim:  sanitizeWinnerMap(src.ctpWins?.sim,  players.length ? players : base.players)
-    },
-    ldWins: {
-      sim: sanitizeWinnerMap(src.ldWins?.sim, players.length ? players : base.players)
-    },
+    ldCtpWins: combinedWinnerMaps(src, players.length ? players : base.players),
     teams:     sanitizeTeams(src.teams, players.length ? players : base.players),
     snapshots: sanitizeSnapshots(src.snapshots)
   };
+  if ((parseInt(src.v, 10) || 0) < SCHEMA_VERSION) {
+    state.rounds.bana.ldCtpHoles = legacyPrizeHoles(src.rounds?.bana, state.rounds.bana.ldCtpHoles, 'bana');
+    state.rounds.sim.ldCtpHoles  = legacyPrizeHoles(src.rounds?.sim,  state.rounds.sim.ldCtpHoles, 'sim');
+  }
   fixHoleChoicesState(state, 'bana');
   fixHoleChoicesState(state, 'sim');
   return state;
