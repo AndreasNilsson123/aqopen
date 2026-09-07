@@ -82,6 +82,7 @@ function section(title, preview, bodyFn, { open = false } = {}) {
 }
 
 function annotateFocusable(root) {
+  const seenKeys = new Map();
   root.querySelectorAll('input, select, textarea, button').forEach(node => {
     if (node.dataset.focusKey) return;
     const sectionKey = node.closest('details[data-section-key]')?.dataset.sectionKey || 'root';
@@ -89,7 +90,7 @@ function annotateFocusable(root) {
     const heading = node.closest('.subcard')?.querySelector('h4')?.textContent?.trim() || '';
     const text = (node.textContent || '').trim();
     const placeholder = node.getAttribute('placeholder') || '';
-    node.dataset.focusKey = [
+    const baseKey = [
       sectionKey,
       node.tagName.toLowerCase(),
       node.type || '',
@@ -98,6 +99,9 @@ function annotateFocusable(root) {
       placeholder,
       text
     ].join('|');
+    const count = seenKeys.get(baseKey) || 0;
+    seenKeys.set(baseKey, count + 1);
+    node.dataset.focusKey = baseKey + '|' + count;
   });
 }
 
