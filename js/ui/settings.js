@@ -143,7 +143,8 @@ export function restoreConfigUiState(root = document) {
   });
 
   if (configUiState.focusKey == null) return;
-  const target = configRoot.querySelector('[data-focus-key="' + configUiState.focusKey + '"]');
+  const target = Array.from(configRoot.querySelectorAll('[data-focus-key]'))
+    .find(node => node.dataset.focusKey === configUiState.focusKey);
   if (!target) return;
 
   target.focus({ preventScroll: true });
