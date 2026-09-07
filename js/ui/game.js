@@ -54,8 +54,7 @@ export function renderGame() {
       const of      = store.S.players.length * HOLES;
       const started = filled > 0;
       const activeBonuses = [];
-      if (ruleEnabled('ctp', rid)) activeBonuses.push('CTP');
-      if (rid === 'sim' && ruleEnabled('ld', 'sim')) activeBonuses.push('LD');
+      if (ruleEnabled('ldctp', rid)) activeBonuses.push('LD/CTP');
       if (ruleEnabled('clean', rid)) activeBonuses.push('Ren rond');
 
       const b = el(
@@ -85,8 +84,7 @@ export function renderGame() {
   const R    = store.S.rounds[rid];
   const h    = clamp(store.S.live.hole, 1, HOLES);
   const par  = R.pars[h - 1];
-  const isCtp = ruleEnabled('ctp', rid) && R.ctp.includes(h);
-  const isLd  = ruleEnabled('ld', 'sim') && rid === 'sim' && R.ld.includes(h);
+  const hasPrize = ruleEnabled('ldctp', rid);
   const missingPlayers = store.S.players.filter(p => arr(rid, p.id)[h - 1] == null);
 
   const head = el(
@@ -98,8 +96,7 @@ export function renderGame() {
         '<div class="gm-hole">' +
           '<div class="gm-num">' + h + '</div>' +
           '<div><div class="gm-par">Par ' + par + '</div>' +
-            (isCtp ? '<span class="tag">CLOSEST TO PIN</span>' : '') +
-            (isLd  ? '<span class="tag">LÄNGSTA DRIVE</span>'  : '') +
+            (hasPrize ? '<span class="tag">LONGEST DRIVE / CTP</span>' : '') +
           '</div>' +
         '</div>' +
         '<div id="gp"></div>' +
@@ -144,8 +141,7 @@ export function renderGame() {
   /* Stakes summary */
   const stakes    = el('<div class="subcard"><h4>Vad står på spel?</h4><p>' + esc(stablefordSummary()) + '</p><div class="chips" id="stakes"></div></div>');
   const stakeRow  = stakes.querySelector('#stakes');
-  if (isCtp) stakeRow.appendChild(el('<span class="tag">CTP +' + fmt(ruleCfg('ctp').points) + ' p</span>'));
-  if (isLd)  stakeRow.appendChild(el('<span class="tag">LD +'  + fmt(ruleCfg('ld').points)  + ' p</span>'));
+  if (hasPrize) stakeRow.appendChild(el('<span class="tag">LD / CTP +' + fmt(ruleCfg('ldctp').points) + ' p</span>'));
   if (ruleEnabled('clean', rid)) stakeRow.appendChild(el('<span class="tag">Ren rond +' + fmt(ruleCfg('clean').points) + ' p</span>'));
   const hcfg = gm().handicap;
   if (hcfg.mode !== 'none' && (hcfg.appliesTo === 'event' || hcfg.appliesTo === 'both' || hcfg.appliesTo === rid)) {
@@ -153,31 +149,17 @@ export function renderGame() {
   }
   head.querySelector('.card-body').appendChild(stakes);
 
-  /* CTP winner */
-  if (isCtp) {
-    const cur = store.S.ctpWins[rid][h] || [];
-    const w   = el('<div class="subcard"><h4>Närmast hål</h4><p>' + fmt(ruleCfg('ctp').points) + ' poäng, delas vid lika.</p></div>');
+  /* Combined prize winner */
+  if (hasPrize) {
+    const cur = store.S.ldCtpWins[rid][h] || [];
+    const w   = el('<div class="subcard"><h4>Longest Drive / CTP</h4><p>' + fmt(ruleCfg('ldctp').points) + ' poäng på hålet, delas vid lika.</p></div>');
     w.appendChild(winnerChips(cur, pid => {
-      const l = new Set(store.S.ctpWins[rid][h] || []);
+      const l = new Set(store.S.ldCtpWins[rid][h] || []);
       l.has(pid) ? l.delete(pid) : l.add(pid);
-      store.S.ctpWins[rid][h] = [...l];
-      if (!store.S.ctpWins[rid][h].length) delete store.S.ctpWins[rid][h];
+      store.S.ldCtpWins[rid][h] = [...l];
+      if (!store.S.ldCtpWins[rid][h].length) delete store.S.ldCtpWins[rid][h];
       save(); import('../app.js').then(m => m.render());
-    }, ruleCfg('ctp').points));
-    head.querySelector('.card-body').appendChild(w);
-  }
-
-  /* LD winner */
-  if (isLd) {
-    const cur = store.S.ldWins.sim[h] || [];
-    const w   = el('<div class="subcard"><h4>Längsta drive</h4><p>Måste landa på fairway. ' + fmt(ruleCfg('ld').points) + ' poäng, delas vid lika.</p></div>');
-    w.appendChild(winnerChips(cur, pid => {
-      const l = new Set(store.S.ldWins.sim[h] || []);
-      l.has(pid) ? l.delete(pid) : l.add(pid);
-      store.S.ldWins.sim[h] = [...l];
-      if (!store.S.ldWins.sim[h].length) delete store.S.ldWins.sim[h];
-      save(); import('../app.js').then(m => m.render());
-    }, ruleCfg('ld').points));
+    }, ruleCfg('ldctp').points));
     head.querySelector('.card-body').appendChild(w);
   }
 
