@@ -6,7 +6,7 @@ import { fmt, el, esc } from '../utils.js';
 import { canEdit, store, allCourses } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus, compute, recordSnapshot
+  handicapRoundBonus, compute, recordSnapshot, ldCtpPoints
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -153,7 +153,7 @@ export function renderRound(rid) {
   if (ruleEnabled('ldctp', rid)) {
     const prize = el('<section class="card"><div class="card-head light">Longest Drive / CTP</div><div class="card-body" id="pb"></div></section>');
     const pb    = prize.querySelector('#pb');
-    pb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera vinnaren på varje hål. Flera markerade delar på ' + fmt(ruleCfg('ldctp').points) + ' poäng.' : 'Visar vem som just nu är markerad som vinnare på varje hål.') + '</p>'));
+    pb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera vinnaren i den kombinerade Longest Drive / CTP-bonusen på varje hål. Flera markerade delar på ' + fmt(ldCtpPoints()) + ' poäng.' : 'Visar vem som just nu är markerad som vinnare i den kombinerade Longest Drive / CTP-bonusen på varje hål.') + '</p>'));
 
     for (let h = 1; h <= HOLES; h++) {
       const wrap = el('<div class="subcard"><h4>Hål ' + h + ' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par ' + R.pars[h - 1] + '</span></h4><div class="chips" id="p' + h + '"></div></div>');
@@ -175,7 +175,7 @@ export function renderRound(rid) {
       } else {
         row.appendChild(el('<span class="empty-note">' + esc(winnerNames(cur) || 'Ingen vinnare markerad ännu') + '</span>'));
       }
-      if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ruleCfg('ldctp').points / cur.length) + ' poäng var.</p>'));
+      if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ldCtpPoints() / cur.length) + ' poäng var.</p>'));
       pb.appendChild(wrap);
     }
     box.appendChild(prize);

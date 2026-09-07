@@ -6,7 +6,7 @@ import { clamp, fmt, el, esc } from '../utils.js';
 import { canEdit, store } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus, stablefordSummary, handicapModeLabel, gm
+  handicapRoundBonus, stablefordSummary, handicapModeLabel, gm, ldCtpPoints
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -96,7 +96,7 @@ export function renderGame() {
         '<div class="gm-hole">' +
           '<div class="gm-num">' + h + '</div>' +
           '<div><div class="gm-par">Par ' + par + '</div>' +
-            (hasPrize ? '<span class="tag">LONGEST DRIVE / CTP</span>' : '') +
+            (hasPrize ? '<span class="tag">LD / CTP · 1P</span>' : '') +
           '</div>' +
         '</div>' +
         '<div id="gp"></div>' +
@@ -141,7 +141,7 @@ export function renderGame() {
   /* Stakes summary */
   const stakes    = el('<div class="subcard"><h4>Vad står på spel?</h4><p>' + esc(stablefordSummary()) + '</p><div class="chips" id="stakes"></div></div>');
   const stakeRow  = stakes.querySelector('#stakes');
-  if (hasPrize) stakeRow.appendChild(el('<span class="tag">LD / CTP +' + fmt(ruleCfg('ldctp').points) + ' p</span>'));
+  if (hasPrize) stakeRow.appendChild(el('<span class="tag">LD / CTP på hålet +' + fmt(ldCtpPoints()) + ' p</span>'));
   if (ruleEnabled('clean', rid)) stakeRow.appendChild(el('<span class="tag">Ren rond +' + fmt(ruleCfg('clean').points) + ' p</span>'));
   const hcfg = gm().handicap;
   if (hcfg.mode !== 'none' && (hcfg.appliesTo === 'event' || hcfg.appliesTo === 'both' || hcfg.appliesTo === rid)) {
@@ -152,14 +152,14 @@ export function renderGame() {
   /* Combined prize winner */
   if (hasPrize) {
     const cur = store.S.ldCtpWins[rid][h] || [];
-    const w   = el('<div class="subcard"><h4>Longest Drive / CTP</h4><p>' + fmt(ruleCfg('ldctp').points) + ' poäng på hålet, delas vid lika.</p></div>');
+    const w   = el('<div class="subcard"><h4>Longest Drive / CTP</h4><p>Kombinerad bonus på varje hål. ' + fmt(ldCtpPoints()) + ' poäng delas vid lika.</p></div>');
     w.appendChild(winnerChips(cur, pid => {
       const l = new Set(store.S.ldCtpWins[rid][h] || []);
       l.has(pid) ? l.delete(pid) : l.add(pid);
       store.S.ldCtpWins[rid][h] = [...l];
       if (!store.S.ldCtpWins[rid][h].length) delete store.S.ldCtpWins[rid][h];
       save(); import('../app.js').then(m => m.render());
-    }, ruleCfg('ldctp').points));
+    }, ldCtpPoints()));
     head.querySelector('.card-body').appendChild(w);
   }
 

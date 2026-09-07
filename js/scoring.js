@@ -40,6 +40,10 @@ export function rulePrizeLabel(key) {
   return ({ ldctp: 'Longest Drive / CTP', clean: 'Ren rond', comeback: 'Comeback' }[key] || key);
 }
 
+export function ldCtpPoints() {
+  return 1;
+}
+
 export function tiebreakLabel(value) {
   return TIEBREAK_OPTIONS.find(o => o.value === value)?.label || 'Ingen';
 }
@@ -60,8 +64,7 @@ export function gamemodeLines(mode = gm()) {
   const lines = ['Stableford: ' + stablefordSummary(mode) + '.'];
 
   if (ruleEnabled('ldctp')) {
-    const c = ruleCfg('ldctp');
-    lines.push('Longest Drive / CTP: ' + fmt(c.points) + ' poäng på varje hål.');
+    lines.push('Longest Drive / CTP: ' + fmt(ldCtpPoints()) + ' poäng på varje hål.');
   }
   if (ruleEnabled('clean')) {
     const cl     = ruleCfg('clean');
@@ -374,7 +377,7 @@ export function computeFromRaw(state) {
       if (!_ruleEnabled('ldctp', rid)) return;
       const wins = state.ldCtpWins?.[rid] || {};
       Object.keys(wins).forEach(h => {
-        const add = splitPoints(wins[h], mode.bonuses.ldctp.points);
+        const add = splitPoints(wins[h], ldCtpPoints());
         Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ldctp += add[pid]; });
       });
     });
@@ -431,7 +434,7 @@ export function compute() {
       if (!ruleEnabled('ldctp', rid)) return;
       const wins = store.S.ldCtpWins[rid] || {};
       Object.keys(wins).forEach(h => {
-        const add = splitPoints(wins[h], ruleCfg('ldctp').points);
+        const add = splitPoints(wins[h], ldCtpPoints());
         Object.keys(add).forEach(pid => { if (res[pid]) res[pid].ldctp += add[pid]; });
       });
     });
