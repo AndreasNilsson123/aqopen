@@ -17,6 +17,13 @@ import {
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
+const configUiState = {
+  sections: {},
+  focusKey: null,
+  selectionStart: null,
+  selectionEnd: null
+};
+
 /* ---- helpers ---- */
 
 function rerender() {
@@ -54,7 +61,9 @@ function applyCourse(rid, course) {
 
 /** Creates a <details class="cfg-section"> panel. */
 function section(title, preview, bodyFn, { open = false } = {}) {
+  if (Object.prototype.hasOwnProperty.call(configUiState.sections, title)) open = configUiState.sections[title];
   const d = el('<details class="cfg-section"' + (open ? ' open' : '') + '></details>');
+  d.dataset.sectionKey = title;
   const s = el(
     '<summary>' +
       '<span>' + title + '</span>' +
@@ -66,7 +75,64 @@ function section(title, preview, bodyFn, { open = false } = {}) {
   const body = el('<div class="cfg-body"></div>');
   bodyFn(body);
   d.appendChild(body);
+  d.addEventListener('toggle', () => {
+    configUiState.sections[title] = d.open;
+  });
   return d;
+}
+
+function annotateFocusable(root) {
+  root.querySelectorAll('input, select, textarea, button').forEach((node, index) => {
+    node.dataset.focusKey = String(index);
+  });
+}
+
+export function captureConfigUiState(root = document) {
+  const configRoot = root?.querySelector?.('[data-config-root]');
+  if (!configRoot) return;
+
+  configRoot.querySelectorAll('details[data-section-key]').forEach(node => {
+    configUiState.sections[node.dataset.sectionKey] = node.open;
+  });
+
+  const active = document.activeElement;
+  if (!active || !configRoot.contains(active) || !active.dataset.focusKey) {
+    configUiState.focusKey = null;
+    configUiState.selectionStart = null;
+    configUiState.selectionEnd = null;
+    return;
+  }
+
+  configUiState.focusKey = active.dataset.focusKey;
+  if (typeof active.selectionStart === 'number' && typeof active.selectionEnd === 'number') {
+    configUiState.selectionStart = active.selectionStart;
+    configUiState.selectionEnd = active.selectionEnd;
+  } else {
+    configUiState.selectionStart = null;
+    configUiState.selectionEnd = null;
+  }
+}
+
+export function restoreConfigUiState(root = document) {
+  const configRoot = root?.querySelector?.('[data-config-root]');
+  if (!configRoot) return;
+
+  configRoot.querySelectorAll('details[data-section-key]').forEach(node => {
+    if (Object.prototype.hasOwnProperty.call(configUiState.sections, node.dataset.sectionKey)) {
+      node.open = !!configUiState.sections[node.dataset.sectionKey];
+    }
+  });
+
+  if (!configUiState.focusKey) return;
+  const target = configRoot.querySelector('[data-focus-key="' + configUiState.focusKey + '"]');
+  if (!target) return;
+
+  target.focus({ preventScroll: true });
+  if (typeof target.setSelectionRange === 'function' &&
+      typeof configUiState.selectionStart === 'number' &&
+      typeof configUiState.selectionEnd === 'number') {
+    target.setSelectionRange(configUiState.selectionStart, configUiState.selectionEnd);
+  }
 }
 
 function warnings() {
@@ -857,13 +923,16 @@ function buildAuditSection(box) {
 /* ====================================================================== */
 
 export function renderConfig() {
-  const box = el('<div></div>');
+  const box = el('<div data-config-root></div>');
 
   buildAccessSection(box);
   buildValidationSection(box);
   buildBackupSection(box);
 
-  if (!canEdit()) return box;
+  if (!canEdit()) {
+    annotateFocusable(box);
+    return box;
+  }
 
   buildEventSection(box);
   buildFormatSection(box);
@@ -876,5 +945,6 @@ export function renderConfig() {
   buildResetSection(box);
   buildAuditSection(box);
 
+  annotateFocusable(box);
   return box;
 }
