@@ -6,7 +6,7 @@ import { clamp, fmt, el, esc } from '../utils.js';
 import { canEdit, store } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus, stablefordSummary, handicapModeLabel, gm, ldCtpPoints
+  handicapRoundBonus, stablefordSummary, handicapModeLabel, gm, ldCtpPoints, ldCtpEligibleHoles
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -84,7 +84,7 @@ export function renderGame() {
   const R    = store.S.rounds[rid];
   const h    = clamp(store.S.live.hole, 1, HOLES);
   const par  = R.pars[h - 1];
-  const hasPrize = ruleEnabled('ldctp', rid);
+  const hasPrize = ruleEnabled('ldctp', rid) && ldCtpEligibleHoles(R).includes(h);
   const missingPlayers = store.S.players.filter(p => arr(rid, p.id)[h - 1] == null);
 
   const head = el(

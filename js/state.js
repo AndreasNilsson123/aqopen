@@ -1,6 +1,17 @@
 import { HOLES, SCHEMA_VERSION, ROUND_IDS, PRESET_LIBRARY, TIEBREAK_OPTIONS } from './constants.js';
 import { clone, uid, clamp, num } from './utils.js';
 
+function allHoleNumbers() {
+  return Array.from({ length: HOLES }, (_, i) => i + 1);
+}
+
+function sanitizeHoleList(list, fallback = allHoleNumbers()) {
+  const clean = Array.isArray(list)
+    ? [...new Set(list.map(v => clamp(parseInt(v, 10) || 0, 1, HOLES)).filter(Boolean))].sort((a, b) => a - b)
+    : [];
+  return clean.length ? clean : [...fallback];
+}
+
 export function makePlayer(name) {
   return { id: uid(), name, handicap: 0 };
 }
@@ -17,8 +28,8 @@ export function defaultState() {
     event: 'AqOpen Sweden',
     players: names.map(makePlayer),
     rounds: {
-      bana: { label: 'Bana (ute)',  courseName: '', pars: [...pars] },
-      sim:  { label: 'Simulator',   courseName: '', pars: [...pars] }
+      bana: { label: 'Bana (ute)',  courseName: '', pars: [...pars], ldCtpHoles: allHoleNumbers() },
+      sim:  { label: 'Simulator',   courseName: '', pars: [...pars], ldCtpHoles: allHoleNumbers() }
     },
     gamemode: presetConfig('aqopen'),
     live: null,
@@ -45,7 +56,8 @@ export function sanitizeRound(round, fallback) {
   return {
     label:      typeof src.label === 'string' && src.label.trim() ? src.label.trim() : fallback.label,
     courseName: typeof src.courseName === 'string' ? src.courseName : '',
-    pars:       Array.from({ length: HOLES }, (_, i) => clamp(num(pars[i], fallback.pars[i] || 4), 3, 6))
+    pars:       Array.from({ length: HOLES }, (_, i) => clamp(num(pars[i], fallback.pars[i] || 4), 3, 6)),
+    ldCtpHoles: sanitizeHoleList(src.ldCtpHoles, fallback.ldCtpHoles)
   };
 }
 
@@ -104,6 +116,15 @@ function combinedWinnerMaps(src, players) {
     bana: pickWinnerMaps(direct.bana, legacyCtp.bana),
     sim:  pickWinnerMaps(direct.sim, legacyCtp.sim, legacyLd.sim)
   };
+}
+
+function legacyPrizeHoles(round, fallback) {
+  const configured = sanitizeHoleList([
+    ...(Array.isArray(round?.ldCtpHoles) ? round.ldCtpHoles : []),
+    ...(Array.isArray(round?.ctp) ? round.ctp : []),
+    ...(Array.isArray(round?.ld) ? round.ld : [])
+  ], []);
+  return configured.length ? configured : [...fallback];
 }
 
 const VALID_TIEBREAKS = new Set(TIEBREAK_OPTIONS.map(o => o.value));
@@ -240,6 +261,10 @@ export function migrateState(raw) {
     teams:     sanitizeTeams(src.teams, players.length ? players : base.players),
     snapshots: sanitizeSnapshots(src.snapshots)
   };
+  if ((parseInt(src.v, 10) || 0) < SCHEMA_VERSION) {
+    state.rounds.bana.ldCtpHoles = legacyPrizeHoles(src.rounds?.bana, state.rounds.bana.ldCtpHoles);
+    state.rounds.sim.ldCtpHoles  = legacyPrizeHoles(src.rounds?.sim,  state.rounds.sim.ldCtpHoles);
+  }
   fixHoleChoicesState(state, 'bana');
   fixHoleChoicesState(state, 'sim');
   return state;

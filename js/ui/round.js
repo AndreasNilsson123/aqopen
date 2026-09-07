@@ -6,7 +6,7 @@ import { fmt, el, esc } from '../utils.js';
 import { canEdit, store, allCourses } from '../store.js';
 import {
   arr, roundStable, holePoints, holeLabel, ruleEnabled, ruleCfg,
-  handicapRoundBonus, compute, recordSnapshot, ldCtpPoints
+  handicapRoundBonus, compute, recordSnapshot, ldCtpPoints, ldCtpEligibleHoles
 } from '../scoring.js';
 import { save } from '../sync.js';
 
@@ -23,6 +23,7 @@ function winnerNames(ids = []) {
 
 export function renderRound(rid) {
   const R   = store.S.rounds[rid];
+  const prizeHoles = ldCtpEligibleHoles(R);
   const box = el('<div></div>');
 
   if (!store.S.players.length) {
@@ -84,7 +85,7 @@ export function renderRound(rid) {
     const hn    = holeNames[i]   ? '<span style="font-size:10px;color:var(--muted);display:block;line-height:1.2">' + esc(holeNames[i]) + '</span>' : '';
     const si    = strokeIndex[i] ? '<span class="tag" style="background:#F0F4F8;color:var(--muted)">SI ' + strokeIndex[i] + '</span>' : '';
     const tags  =
-      (ruleEnabled('ldctp', rid) ? '<span class="tag">LD / CTP</span>' : '') +
+      (ruleEnabled('ldctp', rid) && prizeHoles.includes(i + 1) ? '<span class="tag">LD / CTP</span>' : '') +
       si;
 
     const scoreCell = canEdit()
@@ -153,9 +154,10 @@ export function renderRound(rid) {
   if (ruleEnabled('ldctp', rid)) {
     const prize = el('<section class="card"><div class="card-head light">Longest Drive / CTP</div><div class="card-body" id="pb"></div></section>');
     const pb    = prize.querySelector('#pb');
-    pb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera vinnaren i den kombinerade Longest Drive / CTP-bonusen på varje hål. Flera markerade delar på ' + fmt(ldCtpPoints()) + ' poäng.' : 'Visar vem som just nu är markerad som vinnare i den kombinerade Longest Drive / CTP-bonusen på varje hål.') + '</p>'));
+    const everyHole = prizeHoles.length === HOLES;
+    pb.appendChild(el('<p class="empty-note" style="margin:0 0 10px">' + (canEdit() ? 'Markera vinnaren i den kombinerade Longest Drive / CTP-bonusen ' + (everyHole ? 'på varje hål' : 'på varje bonushål') + '. Flera markerade delar på ' + fmt(ldCtpPoints()) + ' poäng.' : 'Visar vem som just nu är markerad som vinnare i den kombinerade Longest Drive / CTP-bonusen ' + (everyHole ? 'på varje hål.' : 'på varje bonushål.')) + '</p>'));
 
-    for (let h = 1; h <= HOLES; h++) {
+    prizeHoles.forEach(h => {
       const wrap = el('<div class="subcard"><h4>Hål ' + h + ' <span style="font-weight:400;color:var(--muted);font-size:12.5px">· par ' + R.pars[h - 1] + '</span></h4><div class="chips" id="p' + h + '"></div></div>');
       const row  = wrap.querySelector('#p' + h);
       const cur  = store.S.ldCtpWins[rid][h] || [];
@@ -177,7 +179,7 @@ export function renderRound(rid) {
       }
       if (cur.length) wrap.appendChild(el('<p class="empty-note" style="margin:8px 0 0">' + fmt(ldCtpPoints() / cur.length) + ' poäng var.</p>'));
       pb.appendChild(wrap);
-    }
+    });
     box.appendChild(prize);
   }
 

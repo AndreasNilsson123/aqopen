@@ -13,7 +13,7 @@ import {
 } from '../store.js';
 import {
   gm, ruleEnabled, ruleCfg, gamemodeLines, stablefordSummary,
-  handicapModeLabel, handicapAppliesLabel, tiebreakLabel
+  handicapModeLabel, handicapAppliesLabel, tiebreakLabel, ldCtpEligibleHoles
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
@@ -417,7 +417,7 @@ function buildBonusSection(box) {
       card.querySelector('button').onclick = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); rerender(); };
       const chips = card.querySelector('.bonus-rounds');
       if (key === 'ldctp') {
-        chips.appendChild(el('<span class="empty-note">Fast: 1 poäng per hål i båda ronderna.</span>'));
+        chips.appendChild(el('<span class="empty-note">Fast: 1 poäng per hål i båda ronderna. Äldre pågående tävlingar kan behålla tidigare bonushål tills de nollställs.</span>'));
       } else if (rounds.length) {
         const pointsRow = el('<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>');
         pointsRow.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
@@ -557,7 +557,7 @@ function buildPlayersSection(box) {
         store.S.players = store.S.players.filter(x => x.id !== p.id);
         ['bana', 'sim'].forEach(r => {
           delete (store.S.strokes[r] || {})[p.id];
-          Object.keys(store.S.ldCtpWins[r]).forEach(h => {
+          Object.keys(store.S.ldCtpWins?.[r] || {}).forEach(h => {
             store.S.ldCtpWins[r][h] = store.S.ldCtpWins[r][h].filter(id => id !== p.id);
             if (!store.S.ldCtpWins[r][h].length) delete store.S.ldCtpWins[r][h];
           });
@@ -685,7 +685,11 @@ function buildRoundSection(rid, box) {
     body.appendChild(grid);
 
     if (ruleEnabled('ldctp', rid)) {
-      body.appendChild(el('<p class="empty-note" style="margin:18px 0 0">Longest Drive / CTP används automatiskt på alla 18 hål i den här ronden. Vinnare markeras hål för hål i scorevyn eller spelläget.</p>'));
+      const holes = ldCtpEligibleHoles(R);
+      const msg = holes.length === HOLES
+        ? 'Longest Drive / CTP används automatiskt på alla 18 hål i den här ronden. Vinnare markeras hål för hål i scorevyn eller spelläget.'
+        : 'Den här tävlingen behåller tidigare bonushål för Longest Drive / CTP: hål ' + holes.join(', ') + '.';
+      body.appendChild(el('<p class="empty-note" style="margin:18px 0 0">' + esc(msg) + '</p>'));
     }
   }));
 }
