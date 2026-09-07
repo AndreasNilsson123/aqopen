@@ -25,6 +25,37 @@ function sortedPlayers(res) {
   });
 }
 
+function scoreSegments(r = {}) {
+  const hcp = Number(r.hcp ?? 0);
+  return [
+    { cls: 's-stable', label: 'Stableford', value: Math.max(0, (r.stableBana ?? 0) + (r.stableSim ?? 0)) },
+    { cls: 's-ctp',    label: 'CTP',        value: Math.max(0, r.ctp ?? 0) },
+    { cls: 's-ld',     label: 'Drive',      value: Math.max(0, r.ld ?? 0) },
+    { cls: 's-tri',    label: 'Bonus',      value: Math.max(0, r.tri ?? 0) },
+    { cls: 's-cb',     label: 'Comeback',   value: Math.max(0, r.cb ?? 0) },
+    { cls: 's-hcp',    label: 'Handicap',   value: Math.max(0, hcp) },
+    { cls: 's-neg',    label: 'Avdrag',     value: Math.max(0, -hcp) }
+  ].filter(s => s.value > 0);
+}
+
+function scoreScale(players, res) {
+  return Math.max(1, ...players.map(p =>
+    scoreSegments(res[p.id] || {}).reduce((sum, s) => sum + s.value, 0)
+  ));
+}
+
+function renderScoreViz(r, max) {
+  const segments = scoreSegments(r);
+  if (!segments.length) return '<div class="bar empty"></div>';
+  const bar = '<div class="bar">' + segments.map(s =>
+    '<i class="' + s.cls + '" style="width:' + (s.value / max * 100) + '%" title="' + esc(s.label) + ': ' + fmt(s.value) + ' p"></i>'
+  ).join('') + '</div>';
+  const pills = '<div class="bar-pills">' + segments.map(s =>
+    '<span class="bar-pill"><i class="swatch ' + s.cls + '"></i>' + esc(s.label) + ' <b>' + fmt(s.value) + '</b></span>'
+  ).join('') + '</div>';
+  return bar + pills;
+}
+
 /** Render leaderboard standings using an arbitrary (possibly archived) result map & player list. */
 export function renderStandings(players, res, opts = {}) {
   const { readOnly = false, showStats = true } = opts;
@@ -33,7 +64,7 @@ export function renderStandings(players, res, opts = {}) {
     if (dt !== 0) return dt;
     return (res[b.id]?.tb ?? 0) - (res[a.id]?.tb ?? 0);
   });
-  const max  = Math.max(1, ...players.map(p => res[p.id]?.total ?? 0));
+  const max  = scoreScale(players, res);
   const frag = document.createDocumentFragment();
 
   sorted.forEach((p, i) => {
@@ -49,7 +80,6 @@ export function renderStandings(players, res, opts = {}) {
     } catch (_) {}
 
     const total = r.total ?? 0;
-    const seg = (cls, val) => val > 0 ? '<i class="' + cls + '" style="width:' + (val / max * 100) + '%"></i>' : '';
     const badges = [];
     if (i === 0 && total > 0) badges.push('Leder');
     if (r.delta != null && r.delta > 0) badges.push('+' + fmt(r.delta) + ' simform');
@@ -71,12 +101,7 @@ export function renderStandings(players, res, opts = {}) {
             '</div>' +
             '<div class="lb-pts">' + fmt(total) + '<small>p</small></div>' +
           '</div>' +
-          '<div class="bar">' +
-            seg('s-stable', (r.stableBana ?? 0) + (r.stableSim ?? 0)) +
-            seg('s-ctp', r.ctp ?? 0) + seg('s-ld', r.ld ?? 0) +
-            seg('s-tri', r.tri ?? 0) + seg('s-cb', r.cb ?? 0) +
-            seg('s-hcp', r.hcp ?? 0) +
-          '</div>' +
+          renderScoreViz(r, max) +
           '<div class="lb-break">' +
             '<span>Klart <b>' + (banaStats.filled + simStats.filled) + '/36</b></span>' +
             '<span>Bana <b>' + fmt(r.stableBana ?? 0) + '</b></span>' +
@@ -96,7 +121,7 @@ export function renderStandings(players, res, opts = {}) {
 export function renderLeaderboard() {
   const res    = compute();
   const sorted = sortedPlayers(res);
-  const max    = Math.max(1, ...store.S.players.map(p => res[p.id].total));
+  const max    = scoreScale(store.S.players, res);
   const box    = el('<div></div>');
   const mode   = gm();
   const totalHoles = store.S.players.length * ROUND_IDS.length * 18;
@@ -158,7 +183,6 @@ export function renderLeaderboard() {
     const r   = res[p.id];
     const banaStats = roundStable('bana', p.id);
     const simStats  = roundStable('sim', p.id);
-    const seg = (cls, val) => val > 0 ? '<i class="' + cls + '" style="width:' + (val / max * 100) + '%"></i>' : '';
     const badges = [];
     if (i === 0 && r.total > 0) badges.push('Leder');
     if (r.delta != null && r.delta > 0) badges.push('+' + fmt(r.delta) + ' simform');
@@ -179,12 +203,7 @@ export function renderLeaderboard() {
             '</div>' +
             '<div class="lb-pts">' + fmt(r.total) + '<small>p</small></div>' +
           '</div>' +
-          '<div class="bar">' +
-            seg('s-stable', r.stableBana + r.stableSim) +
-            seg('s-ctp', r.ctp) + seg('s-ld', r.ld) +
-            seg('s-tri', r.tri) + seg('s-cb', r.cb) +
-            seg('s-hcp', r.hcp) +
-          '</div>' +
+          renderScoreViz(r, max) +
           '<div class="lb-break">' +
             '<span>Klart <b>' + (banaStats.filled + simStats.filled) + '/36</b></span>' +
             '<span>Bana <b>' + fmt(r.stableBana) + '</b></span>' +
@@ -207,6 +226,7 @@ export function renderLeaderboard() {
       '<span><i class="swatch s-tri"></i>Bonusar</span>' +
       '<span><i class="swatch s-cb"></i>Comeback</span>' +
       '<span><i class="swatch s-hcp"></i>Handicap</span>' +
+      '<span><i class="swatch s-neg"></i>Avdrag</span>' +
     '</div>'
   ));
   box.appendChild(card);

@@ -102,14 +102,19 @@ h3.sec{
 .lb-name{font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lb-pts{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:19px;color:var(--navy)}
 .lb-pts small{font-size:11px;color:var(--muted);font-family:Inter,sans-serif;margin-left:3px}
-.bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:#EDF1F6;margin:8px 0 6px}
-.bar i{display:block;height:100%}
+.bar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:#EDF1F6;margin:8px 0 6px}
+.bar.empty{background:#F3F5F8}
+.bar i{display:block;height:100%;min-width:2px}
 .s-stable{background:var(--navy)}
 .s-ctp{background:var(--blue)}
 .s-ld{background:#63A0DA}
 .s-tri{background:#9FC4E6}
 .s-cb{background:var(--gold)}
 .s-hcp{background:#7F8DF0}
+.s-neg{background:#D45B5B}
+.bar-pills{display:flex;flex-wrap:wrap;gap:4px 8px;margin:0 0 6px}
+.bar-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.bar-pill b{color:var(--ink);font-family:"IBM Plex Mono",monospace;font-weight:600}
 .lb-break{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px}
 .lb-break b{color:var(--ink);font-family:"IBM Plex Mono",monospace;font-weight:600}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:4px}
