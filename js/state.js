@@ -85,17 +85,14 @@ export function sanitizeWinnerMap(map, players) {
   return out;
 }
 
-function pickWinnerMaps(...maps) {
+function mergeWinnerMaps(...maps) {
   const out = {};
-  for (let hole = 1; hole <= HOLES; hole++) {
-    const key = String(hole);
-    for (const map of maps) {
-      if (Array.isArray(map?.[key]) && map[key].length) {
-        out[key] = [...map[key]];
-        break;
-      }
-    }
-  }
+  maps.forEach(map => {
+    Object.entries(map || {}).forEach(([hole, ids]) => {
+      const merged = [...new Set([...(out[hole] || []), ...(ids || [])])];
+      if (merged.length) out[hole] = merged;
+    });
+  });
   return out;
 }
 
@@ -113,8 +110,8 @@ function combinedWinnerMaps(src, players) {
     sim: sanitizeWinnerMap(src.ldWins?.sim, players)
   };
   return {
-    bana: pickWinnerMaps(direct.bana, legacyCtp.bana),
-    sim:  pickWinnerMaps(direct.sim, legacyCtp.sim, legacyLd.sim)
+    bana: mergeWinnerMaps(direct.bana, legacyCtp.bana),
+    sim:  mergeWinnerMaps(direct.sim, legacyCtp.sim, legacyLd.sim)
   };
 }
 

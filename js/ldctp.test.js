@@ -47,8 +47,8 @@ test('legacy winner maps migrate into one combined per-hole winner list', () => 
   const res = computeFromRaw(state);
 
   assert.deepEqual(state.ldCtpWins.bana['3'], ['a']);
-  assert.deepEqual(state.ldCtpWins.sim['7'], ['b']);
+  assert.deepEqual([...state.ldCtpWins.sim['7']].sort(), ['a', 'b']);
   assert.deepEqual(state.ldCtpWins.sim['14'], ['a', 'b']);
-  assert.equal(res.a.ldctp, 1.5);
-  assert.equal(res.b.ldctp, 1.5);
+  assert.equal(res.a.ldctp, 2);
+  assert.equal(res.b.ldctp, 1);
 });
