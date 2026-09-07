@@ -17,6 +17,13 @@ import {
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
+const configUiState = {
+  sections: {},
+  focusKey: null,
+  selectionStart: null,
+  selectionEnd: null
+};
+
 /* ---- helpers ---- */
 
 function rerender() {
@@ -54,7 +61,9 @@ function applyCourse(rid, course) {
 
 /** Creates a <details class="cfg-section"> panel. */
 function section(title, preview, bodyFn, { open = false } = {}) {
+  if (Object.prototype.hasOwnProperty.call(configUiState.sections, title)) open = configUiState.sections[title];
   const d = el('<details class="cfg-section"' + (open ? ' open' : '') + '></details>');
+  d.dataset.sectionKey = title;
   const s = el(
     '<summary>' +
       '<span>' + title + '</span>' +
@@ -66,7 +75,88 @@ function section(title, preview, bodyFn, { open = false } = {}) {
   const body = el('<div class="cfg-body"></div>');
   bodyFn(body);
   d.appendChild(body);
+  d.addEventListener('toggle', () => {
+    configUiState.sections[title] = d.open;
+  });
   return d;
+}
+
+function annotateFocusable(root) {
+  const seenKeys = new Map();
+  root.querySelectorAll('input, select, textarea, button').forEach(node => {
+    if (node.dataset.focusKey) return;
+    const sectionKey = node.closest('details[data-section-key]')?.dataset.sectionKey || 'root';
+    const fieldLabel = node.closest('.field')?.querySelector('label')?.textContent?.trim() || '';
+    const heading = node.closest('.subcard')?.querySelector('h4')?.textContent?.trim() || '';
+    const text = (node.textContent || '').trim();
+    const placeholder = node.getAttribute('placeholder') || '';
+    const baseKey = [
+      sectionKey,
+      node.tagName.toLowerCase(),
+      node.type || '',
+      fieldLabel,
+      heading,
+      placeholder,
+      text
+    ].join('|');
+    const count = seenKeys.get(baseKey) || 0;
+    seenKeys.set(baseKey, count + 1);
+    node.dataset.focusKey = baseKey + '|' + count;
+  });
+}
+
+function setFocusKey(node, key) {
+  if (node) node.dataset.focusKey = key;
+  return node;
+}
+
+export function captureConfigUiState(root = document) {
+  const configRoot = root?.querySelector?.('[data-config-root]');
+  if (!configRoot) return;
+
+  configRoot.querySelectorAll('details[data-section-key]').forEach(node => {
+    configUiState.sections[node.dataset.sectionKey] = node.open;
+  });
+
+  const active = document.activeElement;
+  if (!active || !configRoot.contains(active) || !active.dataset.focusKey) {
+    configUiState.focusKey = null;
+    configUiState.selectionStart = null;
+    configUiState.selectionEnd = null;
+    return;
+  }
+
+  configUiState.focusKey = active.dataset.focusKey;
+  if (typeof active.selectionStart === 'number' && typeof active.selectionEnd === 'number') {
+    configUiState.selectionStart = active.selectionStart;
+    configUiState.selectionEnd = active.selectionEnd;
+  } else {
+    configUiState.selectionStart = null;
+    configUiState.selectionEnd = null;
+  }
+}
+
+export function restoreConfigUiState(root = document) {
+  const configRoot = root?.querySelector?.('[data-config-root]');
+  if (!configRoot) return;
+
+  configRoot.querySelectorAll('details[data-section-key]').forEach(node => {
+    if (Object.prototype.hasOwnProperty.call(configUiState.sections, node.dataset.sectionKey)) {
+      node.open = !!configUiState.sections[node.dataset.sectionKey];
+    }
+  });
+
+  if (configUiState.focusKey == null) return;
+  const target = Array.from(configRoot.querySelectorAll('[data-focus-key]'))
+    .find(node => node.dataset.focusKey === configUiState.focusKey);
+  if (!target) return;
+
+  target.focus({ preventScroll: true });
+  if (typeof target.setSelectionRange === 'function' &&
+      typeof configUiState.selectionStart === 'number' &&
+      typeof configUiState.selectionEnd === 'number') {
+    target.setSelectionRange(configUiState.selectionStart, configUiState.selectionEnd);
+  }
 }
 
 function warnings() {
@@ -159,6 +249,7 @@ function buildAccessSection(box) {
 
     const keyRow = el('<div class="field"><label>Nyckel</label><input type="password" placeholder="Valfri redigeringsnyckel" value="' + esc(store.local.editKey) + '"></div>');
     const keyInp = keyRow.querySelector('input');
+    setFocusKey(keyInp, 'access:key');
     keyInp.onblur = () => {
       store.local.editKey = keyInp.value.trim();
       persistLocalPrefs();
@@ -172,6 +263,8 @@ function buildAccessSection(box) {
     const chips = localMode.querySelector('.chips');
     const editChip = el('<button class="chip" aria-pressed="' + (!store.local.spectator) + '">Redigering</button>');
     const viewChip = el('<button class="chip blue" aria-pressed="' + store.local.spectator + '">Visningsläge</button>');
+    setFocusKey(editChip, 'access:edit');
+    setFocusKey(viewChip, 'access:view');
     editChip.onclick = () => {
       store.local.spectator = false;
       persistLocalPrefs();
@@ -226,8 +319,13 @@ function buildBackupSection(box) {
       '</div>'
     );
     const exportArea = exportCard.querySelector('textarea');
-    exportCard.querySelector('[data-act="fill"]').onclick = () => resetExport(exportArea);
-    exportCard.querySelector('[data-act="download"]').onclick = () => {
+    const fillBtn = exportCard.querySelector('[data-act="fill"]');
+    const downloadBtn = exportCard.querySelector('[data-act="download"]');
+    setFocusKey(exportArea, 'backup:export:textarea');
+    setFocusKey(fillBtn, 'backup:export:fill');
+    setFocusKey(downloadBtn, 'backup:export:download');
+    fillBtn.onclick = () => resetExport(exportArea);
+    downloadBtn.onclick = () => {
       const content = JSON.stringify({ state: store.S }, null, 2);
       triggerDownload('aqopen-backup-' + new Date().toISOString().slice(0, 10) + '.json', content);
     };
@@ -244,7 +342,9 @@ function buildBackupSection(box) {
         '</div>'
       );
       const archiveMsg = archiveCard.querySelector('.archive-msg');
-      archiveCard.querySelector('button').onclick = async () => {
+      const archiveBtn = archiveCard.querySelector('button');
+      setFocusKey(archiveBtn, 'backup:archive');
+      archiveBtn.onclick = async () => {
         archiveMsg.textContent = 'Arkiverar…';
         try {
           const { archiveEvent } = await import('../app.js');
@@ -273,7 +373,10 @@ function buildBackupSection(box) {
     );
     const importArea = importCard.querySelector('textarea');
     const importMsg  = importCard.querySelector('.import-msg');
-    importCard.querySelector('button').onclick = () => {
+    const importBtn = importCard.querySelector('button');
+    setFocusKey(importArea, 'backup:import:textarea');
+    setFocusKey(importBtn, 'backup:import:button');
+    importBtn.onclick = () => {
       try {
         const raw = JSON.parse(importArea.value);
         store.S = migrateState(raw?.state ?? (typeof raw === 'object' && raw !== null ? raw : {}));
@@ -300,6 +403,8 @@ function buildBackupSection(box) {
     );
     const restoreMsg = restoreCard.querySelector('.restore-msg');
     const [restoreBtn, clearBtn] = restoreCard.querySelectorAll('button');
+    setFocusKey(restoreBtn, 'backup:restore');
+    setFocusKey(clearBtn, 'backup:clear');
     restoreBtn.onclick = () => {
       const latest = loadResetBackup();
       if (!latest) { restoreMsg.textContent = 'Ingen backup finns att återställa.'; return; }
@@ -322,6 +427,7 @@ function buildEventSection(box) {
   box.appendChild(section('Tävling', preview, body => {
     const row   = el('<div class="field"><label>Namn</label><input type="text" value="' + esc(store.S.event) + '"></div>');
     const input = row.querySelector('input');
+    setFocusKey(input, 'event:name');
     input.onblur    = () => { store.S.event = input.value.trim() || 'AqOpen Sweden'; save(); rerender(); };
     input.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
     body.appendChild(row);
@@ -340,6 +446,7 @@ function buildFormatSection(box) {
 
     const presetRow = el('<div class="field"><label>Preset</label><select></select></div>');
     const sel       = presetRow.querySelector('select');
+    setFocusKey(sel, 'format:preset');
     [['aqopen', 'AqOpen Classic'], ['stableford', 'Enkel Stableford'], ['custom', 'Eget upplägg']].forEach(([id, name]) => {
       const o = document.createElement('option');
       o.value = id; o.textContent = name;
@@ -355,6 +462,7 @@ function buildFormatSection(box) {
 
     const nameRow   = el('<div class="field"><label>Namn</label><input type="text" value="' + esc(store.S.gamemode.name) + '"></div>');
     const nameInput = nameRow.querySelector('input');
+    setFocusKey(nameInput, 'format:name');
     nameInput.onblur    = () => { touchGamemode(); store.S.gamemode.name = nameInput.value.trim() || 'Eget upplägg'; save(); rerender(); };
     nameInput.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
     body.appendChild(nameRow);
@@ -362,6 +470,7 @@ function buildFormatSection(box) {
     // Tiebreak
     const tbRow = el('<div class="field"><label>Playoff</label><select></select></div>');
     const tbSel = tbRow.querySelector('select');
+    setFocusKey(tbSel, 'format:tiebreak');
     TIEBREAK_OPTIONS.forEach(opt => {
       const o = document.createElement('option');
       o.value = opt.value; o.textContent = opt.label;
@@ -389,7 +498,9 @@ function buildStablefordSection(box) {
     const grid = el('<div class="parGrid"></div>');
     [['eaglePlus', 'Eagle+'], ['birdie', 'Birdie'], ['par', 'Par'], ['bogey', 'Bogey'], ['double', 'Dubbel'], ['triple', 'Trippel+']].forEach(([key, label]) => {
       const cell = el('<div class="parCell"><span>' + label + '</span><input type="number" value="' + store.S.gamemode.stableford[key] + '"></div>');
-      cell.querySelector('input').onchange = e => {
+      const input = cell.querySelector('input');
+      setFocusKey(input, 'stableford:' + key);
+      input.onchange = e => {
         touchGamemode();
         store.S.gamemode.stableford[key] = clamp(num(e.target.value, 0), -20, 50);
         save(); rerender();
@@ -421,16 +532,21 @@ function buildBonusSection(box) {
           '<div class="chips bonus-rounds"></div>' +
         '</div>'
       );
-      card.querySelector('button').onclick = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); rerender(); };
+      const toggleBtn = card.querySelector('button');
+      setFocusKey(toggleBtn, 'bonus:' + key + ':toggle');
+      toggleBtn.onclick = () => { touchGamemode(); rule.enabled = !rule.enabled; save(); rerender(); };
       const chips = card.querySelector('.bonus-rounds');
       if (key === 'ldctp') {
         chips.appendChild(el('<span class="empty-note">Fast: 1 poäng per hål i båda ronderna. Äldre pågående tävlingar kan behålla tidigare bonushål tills de nollställs.</span>'));
       } else if (rounds.length) {
         const pointsRow = el('<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>');
-        pointsRow.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
+        const pointsInput = pointsRow.querySelector('input');
+        setFocusKey(pointsInput, 'bonus:' + key + ':points');
+        pointsInput.onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
         card.insertBefore(pointsRow, chips);
         rounds.forEach(rid => {
           const chip = el('<button class="chip" aria-pressed="' + rule.rounds[rid] + '">' + ROUND_LABELS[rid] + '</button>');
+          setFocusKey(chip, 'bonus:' + key + ':round:' + rid);
           chip.onclick = () => {
             touchGamemode();
             store.S.gamemode.bonuses[key].rounds[rid] = !rule.rounds[rid];
@@ -440,7 +556,9 @@ function buildBonusSection(box) {
         });
       } else {
         const pointsRow = el('<div class="field" style="margin-top:8px"><label>Poäng</label><input type="number" value="' + rule.points + '"></div>');
-        pointsRow.querySelector('input').onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
+        const pointsInput = pointsRow.querySelector('input');
+        setFocusKey(pointsInput, 'bonus:' + key + ':points');
+        pointsInput.onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
         card.insertBefore(pointsRow, chips);
         chips.appendChild(el('<span class="empty-note">Jämför alltid bana mot simulator.</span>'));
       }
@@ -458,22 +576,28 @@ function buildHandicapSection(box) {
 
     const modeRow = el('<div class="field"><label>Modell</label><select><option value="none">Ingen</option><option value="flat">Fast bonus</option><option value="allowance">Procentuell</option></select></div>');
     const hcMode  = modeRow.querySelector('select');
+    setFocusKey(hcMode, 'handicap:mode');
     hcMode.value    = hc.mode;
     hcMode.onchange = e => { touchGamemode(); store.S.gamemode.handicap.mode = e.target.value; save(); rerender(); };
     body.appendChild(modeRow);
 
     const applyRow = el('<div class="field"><label>Gäller</label><select><option value="event">Totalt</option><option value="both">Båda ronderna</option><option value="bana">Bana</option><option value="sim">Simulator</option></select></div>');
     const hcApply  = applyRow.querySelector('select');
+    setFocusKey(hcApply, 'handicap:applies');
     hcApply.value    = hc.appliesTo;
     hcApply.onchange = e => { touchGamemode(); store.S.gamemode.handicap.appliesTo = e.target.value; save(); rerender(); };
     body.appendChild(applyRow);
 
     const allowRow = el('<div class="field"><label>Allowance %</label><input type="number" value="' + hc.allowance + '"></div>');
-    allowRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.allowance = clamp(num(e.target.value, 100), 0, 200); save(); rerender(); };
+    const allowInput = allowRow.querySelector('input');
+    setFocusKey(allowInput, 'handicap:allowance');
+    allowInput.onchange = e => { touchGamemode(); store.S.gamemode.handicap.allowance = clamp(num(e.target.value, 100), 0, 200); save(); rerender(); };
     body.appendChild(allowRow);
 
     const valueRow = el('<div class="field"><label>Värde / pt</label><input type="number" step="0.5" value="' + hc.pointValue + '"></div>');
-    valueRow.querySelector('input').onchange = e => { touchGamemode(); store.S.gamemode.handicap.pointValue = clamp(num(e.target.value, 1), -10, 10); save(); rerender(); };
+    const valueInput = valueRow.querySelector('input');
+    setFocusKey(valueInput, 'handicap:value');
+    valueInput.onchange = e => { touchGamemode(); store.S.gamemode.handicap.pointValue = clamp(num(e.target.value, 1), -10, 10); save(); rerender(); };
     body.appendChild(valueRow);
   }));
 }
@@ -495,6 +619,8 @@ function buildPlayersSection(box) {
     const loadBtn = db.querySelector('[data-db-load]');
     const saveBtn = db.querySelector('[data-db-save]');
     const dbMsg   = db.querySelector('[data-db-msg]');
+    setFocusKey(loadBtn, 'players:db:load');
+    setFocusKey(saveBtn, 'players:db:save');
     const lockButtons = on => { loadBtn.disabled = on; saveBtn.disabled = on; };
 
     loadBtn.onclick = async () => {
@@ -557,6 +683,9 @@ function buildPlayersSection(box) {
       const inp = f.querySelector('input[type=text]');
       const hcp = f.querySelector('input[type=number]');
       const del = f.querySelector('button');
+      setFocusKey(inp, 'player:' + p.id + ':name');
+      setFocusKey(hcp, 'player:' + p.id + ':handicap');
+      setFocusKey(del, 'player:' + p.id + ':delete');
       inp.onblur    = () => { p.name = inp.value.trim() || 'Spelare ' + (i + 1); save(); rerender(); };
       inp.onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
       hcp.onchange  = () => { p.handicap = clamp(num(hcp.value, 0), -36, 54); save(); rerender(); };
@@ -575,6 +704,7 @@ function buildPlayersSection(box) {
     });
 
     const add = el('<button class="btn ghost">+ Lägg till spelare</button>');
+    setFocusKey(add, 'players:add');
     add.onclick = () => {
       store.S.players.push(makePlayer('Spelare ' + (store.S.players.length + 1)));
       save(); rerender();
@@ -602,6 +732,8 @@ function buildRoundSection(rid, box) {
     const applyRow = el('<div class="field" style="align-items:stretch"></div>');
     applyRow.appendChild(sel);
     const useBtn = el('<button class="btn" style="white-space:nowrap">Använd</button>');
+    setFocusKey(sel, 'round:' + rid + ':course');
+    setFocusKey(useBtn, 'round:' + rid + ':course:apply');
     useBtn.onclick = () => {
       if (sel.value === '') return;
       applyCourse(rid, list[+sel.value]);
@@ -628,7 +760,10 @@ function buildRoundSection(rid, box) {
       '</div>'
     );
     const pInput = paste.querySelector('input'), pMsg = paste.querySelector('.paste-msg');
-    paste.querySelector('button').onclick = () => {
+    const pasteBtn = paste.querySelector('button');
+    setFocusKey(pInput, 'round:' + rid + ':paste');
+    setFocusKey(pasteBtn, 'round:' + rid + ':paste:apply');
+    pasteBtn.onclick = () => {
       const nums = (pInput.value.match(/\d+/g) || []).map(Number);
       if (nums.length !== HOLES)           { pMsg.textContent = 'Hittade ' + nums.length + ' siffror, behöver 18.'; return; }
       if (nums.some(n => n < 3 || n > 6)) { pMsg.textContent = 'Par ska ligga mellan 3 och 6.'; return; }
@@ -648,7 +783,10 @@ function buildRoundSection(rid, box) {
       '</div>'
     );
     const cName = saveC.querySelector('input');
-    saveC.querySelector('button').onclick = () => {
+    const saveCourseBtn = saveC.querySelector('button');
+    setFocusKey(cName, 'round:' + rid + ':custom:name');
+    setFocusKey(saveCourseBtn, 'round:' + rid + ':custom:save');
+    saveCourseBtn.onclick = () => {
       const nm = cName.value.trim();
       if (!nm) return;
       store.S.customCourses = (store.S.customCourses || []).filter(c => c.name !== nm);
@@ -660,13 +798,14 @@ function buildRoundSection(rid, box) {
 
     if ((store.S.customCourses || []).length) {
       const own = el('<div style="margin-top:12px"><h3 class="sec">Egna banor</h3></div>');
-      store.S.customCourses.forEach(course => {
+      store.S.customCourses.forEach((course, courseIndex) => {
         const line = el(
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line)">' +
             '<span style="font-size:13.5px">' + esc(course.name) + ' <span class="empty-note">par ' + course.pars.reduce((a, b) => a + b, 0) + '</span></span>' +
           '</div>'
         );
         const del = el('<button class="btn danger" style="padding:6px 10px">Ta bort</button>');
+        setFocusKey(del, 'round:' + rid + ':custom:' + courseIndex + ':delete');
         del.onclick = () => {
           store.S.customCourses = store.S.customCourses.filter(x => x.name !== course.name);
           save(); rerender();
@@ -682,6 +821,7 @@ function buildRoundSection(rid, box) {
     R.pars.forEach((p, i) => {
       const cell = el('<div class="parCell"><span>Hål ' + (i + 1) + '</span><input type="number" min="3" max="6" value="' + p + '"></div>');
       const inp  = cell.querySelector('input');
+      setFocusKey(inp, 'round:' + rid + ':par:' + i);
       inp.onchange = () => {
         R.pars[i] = Math.min(6, Math.max(3, parseInt(inp.value, 10) || 4));
         fixHoleChoices(rid);
@@ -708,6 +848,7 @@ function buildResetSection(box) {
     '</div>'
   );
   const btn = rc.querySelector('button');
+  setFocusKey(btn, 'reset:confirm');
   btn.onclick = () => {
     btn.textContent = 'Tryck igen för att bekräfta';
     btn.onclick     = () => {
@@ -731,6 +872,7 @@ function buildTeamsSection(box) {
 
     const enableRow = el('<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px"><strong>Lagformat</strong></div>');
     const toggleBtn = el('<button class="chip blue" aria-pressed="' + !!teams.enabled + '">' + (teams.enabled ? 'På' : 'Av') + '</button>');
+    setFocusKey(toggleBtn, 'teams:enabled');
     toggleBtn.onclick = () => {
       if (!store.S.teams) store.S.teams = { enabled: false, groups: [], names: [], scoring: 'sum' };
       store.S.teams.enabled = !store.S.teams.enabled;
@@ -744,6 +886,7 @@ function buildTeamsSection(box) {
     // Scoring mode
     const scoreRow = el('<div class="field"><label>Poäng</label><select><option value="sum">Summering</option><option value="bestball">Best-ball</option></select></div>');
     const scoreSel = scoreRow.querySelector('select');
+    setFocusKey(scoreSel, 'teams:scoring');
     scoreSel.value    = teams.scoring || 'sum';
     scoreSel.onchange = () => { store.S.teams.scoring = scoreSel.value; save(); rerender(); };
     body.appendChild(scoreRow);
@@ -760,6 +903,9 @@ function buildTeamsSection(box) {
         '</div>'
       );
       const nmInp = gc.querySelector('input');
+      const delBtn = gc.querySelector('button.btn.danger');
+      setFocusKey(nmInp, 'team:' + gi + ':name');
+      setFocusKey(delBtn, 'team:' + gi + ':delete');
       nmInp.onblur = () => {
         if (!store.S.teams.names) store.S.teams.names = [];
         store.S.teams.names[gi] = nmInp.value.trim() || 'Lag ' + (gi + 1);
@@ -771,6 +917,7 @@ function buildTeamsSection(box) {
       store.S.players.forEach(p => {
         const on = group.includes(p.id);
         const c  = el('<button class="chip' + (on ? ' blue' : '') + '" aria-pressed="' + on + '">' + esc(p.name) + '</button>');
+        setFocusKey(c, 'team:' + gi + ':player:' + p.id);
         c.onclick = () => {
           const list = new Set(store.S.teams.groups[gi] || []);
           list.has(p.id) ? list.delete(p.id) : list.add(p.id);
@@ -780,7 +927,7 @@ function buildTeamsSection(box) {
         chips.appendChild(c);
       });
 
-      gc.querySelector('button.btn.danger').onclick = () => {
+      delBtn.onclick = () => {
         store.S.teams.groups.splice(gi, 1);
         store.S.teams.names.splice(gi, 1);
         save(); rerender();
@@ -789,6 +936,7 @@ function buildTeamsSection(box) {
     });
 
     const addBtn = el('<button class="btn ghost">+ Lägg till lag</button>');
+    setFocusKey(addBtn, 'teams:add');
     addBtn.onclick = () => {
       if (!store.S.teams.groups) store.S.teams.groups = [];
       if (!store.S.teams.names)  store.S.teams.names  = [];
@@ -811,6 +959,7 @@ function buildAuditSection(box) {
     body.appendChild(logArea);
 
     const loadBtn = el('<button class="btn ghost" style="margin-top:8px">Ladda logg</button>');
+    setFocusKey(loadBtn, 'audit:load');
     loadBtn.onclick = async () => {
       loadBtn.disabled = true;
       loadBtn.textContent = 'Laddar…';
@@ -857,13 +1006,16 @@ function buildAuditSection(box) {
 /* ====================================================================== */
 
 export function renderConfig() {
-  const box = el('<div></div>');
+  const box = el('<div data-config-root></div>');
 
   buildAccessSection(box);
   buildValidationSection(box);
   buildBackupSection(box);
 
-  if (!canEdit()) return box;
+  if (!canEdit()) {
+    annotateFocusable(box);
+    return box;
+  }
 
   buildEventSection(box);
   buildFormatSection(box);
@@ -876,5 +1028,6 @@ export function renderConfig() {
   buildResetSection(box);
   buildAuditSection(box);
 
+  annotateFocusable(box);
   return box;
 }

@@ -10,7 +10,7 @@ import { load } from './sync.js';
 import { renderLeaderboard, renderHistory, renderStandings } from './ui/leaderboard.js';
 import { renderRound }       from './ui/round.js';
 import { renderGame }        from './ui/game.js';
-import { renderConfig }      from './ui/settings.js';
+import { captureConfigUiState, renderConfig, restoreConfigUiState } from './ui/settings.js';
 
 /* ---- history API client ---- */
 
@@ -70,6 +70,7 @@ let viewingArchived = null; // { event, players, res, index } when browsing hist
 
 export function render() {
   const view = document.getElementById('view');
+  if (lastRenderedTab === 'cfg') captureConfigUiState(view);
   view.innerHTML = '';
   document.querySelector('.brand-note').textContent = store.S.event || 'Resultat & poängräkning';
   document.title = (store.S.event || 'AqOpen Sweden') + ' – Scoring';
@@ -84,7 +85,10 @@ export function render() {
   if      (store.tab === 'lb')       view.appendChild(renderLeaderboard());
   else if (store.tab === 'historik') renderHistoryTab(view);
   else if (store.tab === 'spel')     view.appendChild(renderGame());
-  else if (store.tab === 'cfg')      view.appendChild(renderConfig());
+  else if (store.tab === 'cfg') {
+    view.appendChild(renderConfig());
+    restoreConfigUiState(view);
+  }
   else                               view.appendChild(renderRound(store.tab));
 
   if (tabChanged) window.scrollTo({ top: 0, behavior: 'instant' });
