@@ -36,6 +36,13 @@ function fixHoleChoices(rid) {
   fixHoleChoicesState(store.S, rid);
 }
 
+export function ldCtpRoundNote(round) {
+  const holes = ldCtpEligibleHoles(round);
+  return holes.length === HOLES
+    ? 'Longest Drive / CTP används automatiskt på alla 18 hål i den här ronden. Vinnare markeras hål för hål i scorevyn eller spelläget.'
+    : 'Den här tävlingen behåller tidigare bonushål för Longest Drive / CTP: hål ' + holes.join(', ') + '.';
+}
+
 function applyCourse(rid, course) {
   if (!course) return;
   const R      = store.S.rounds[rid];
@@ -685,11 +692,7 @@ function buildRoundSection(rid, box) {
     body.appendChild(grid);
 
     if (ruleEnabled('ldctp', rid)) {
-      const holes = ldCtpEligibleHoles(R);
-      const msg = holes.length === HOLES
-        ? 'Longest Drive / CTP används automatiskt på alla 18 hål i den här ronden. Vinnare markeras hål för hål i scorevyn eller spelläget.'
-        : 'Den här tävlingen behåller tidigare bonushål för Longest Drive / CTP: hål ' + holes.join(', ') + '.';
-      body.appendChild(el('<p class="empty-note" style="margin:18px 0 0">' + esc(msg) + '</p>'));
+      body.appendChild(el('<p class="empty-note" style="margin:18px 0 0">' + esc(ldCtpRoundNote(R)) + '</p>'));
     }
   }));
 }

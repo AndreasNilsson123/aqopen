@@ -118,11 +118,11 @@ function combinedWinnerMaps(src, players) {
   };
 }
 
-function legacyPrizeHoles(round, fallback) {
+function legacyPrizeHoles(round, fallback, rid) {
   const configured = sanitizeHoleList([
     ...(Array.isArray(round?.ldCtpHoles) ? round.ldCtpHoles : []),
     ...(Array.isArray(round?.ctp) ? round.ctp : []),
-    ...(Array.isArray(round?.ld) ? round.ld : [])
+    ...(rid === 'sim' && Array.isArray(round?.ld) ? round.ld : [])
   ], []);
   return configured.length ? configured : [...fallback];
 }
@@ -262,8 +262,8 @@ export function migrateState(raw) {
     snapshots: sanitizeSnapshots(src.snapshots)
   };
   if ((parseInt(src.v, 10) || 0) < SCHEMA_VERSION) {
-    state.rounds.bana.ldCtpHoles = legacyPrizeHoles(src.rounds?.bana, state.rounds.bana.ldCtpHoles);
-    state.rounds.sim.ldCtpHoles  = legacyPrizeHoles(src.rounds?.sim,  state.rounds.sim.ldCtpHoles);
+    state.rounds.bana.ldCtpHoles = legacyPrizeHoles(src.rounds?.bana, state.rounds.bana.ldCtpHoles, 'bana');
+    state.rounds.sim.ldCtpHoles  = legacyPrizeHoles(src.rounds?.sim,  state.rounds.sim.ldCtpHoles, 'sim');
   }
   fixHoleChoicesState(state, 'bana');
   fixHoleChoicesState(state, 'sim');
