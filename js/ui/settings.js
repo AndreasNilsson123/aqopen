@@ -123,7 +123,7 @@ export function restoreConfigUiState(root = document) {
     }
   });
 
-  if (!configUiState.focusKey) return;
+  if (configUiState.focusKey == null) return;
   const target = configRoot.querySelector('[data-focus-key="' + configUiState.focusKey + '"]');
   if (!target) return;
 
