@@ -6,7 +6,7 @@
  */
 import { HOLES, ROUND_IDS, ROUND_LABELS, TIEBREAK_OPTIONS } from '../constants.js';
 import { clamp, num, fmt, el, esc, clone } from '../utils.js';
-import { makePlayer, presetConfig, fixHoleChoicesState, migrateState } from '../state.js';
+import { makePlayer, presetConfig, fixHoleChoicesState, migrateState, resetLdCtpHolesState } from '../state.js';
 import {
   allCourses, canEdit, clearResetBackup, loadResetBackup,
   persistLocalPrefs, saveResetBackup, store
@@ -855,6 +855,7 @@ function buildResetSection(box) {
       saveResetBackup(clone(store.S));
       store.S.strokes   = { bana: {}, sim: {} };
       store.S.ldCtpWins = { bana: {}, sim: {} };
+      resetLdCtpHolesState(store.S);
       store.S.live      = null;
       store.S.snapshots = [];
       save(); rerender();

@@ -5,6 +5,13 @@ function allHoleNumbers() {
   return Array.from({ length: HOLES }, (_, i) => i + 1);
 }
 
+export function resetLdCtpHolesState(state) {
+  ROUND_IDS.forEach(rid => {
+    if (!state?.rounds?.[rid]) return;
+    state.rounds[rid].ldCtpHoles = allHoleNumbers();
+  });
+}
+
 function sanitizeHoleList(list, fallback = allHoleNumbers()) {
   const clean = Array.isArray(list)
     ? [...new Set(list.map(v => clamp(parseInt(v, 10) || 0, 1, HOLES)).filter(Boolean))].sort((a, b) => a - b)

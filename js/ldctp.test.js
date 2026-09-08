@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { migrateState } from './state.js';
+import { migrateState, resetLdCtpHolesState } from './state.js';
 import { computeFromRaw, ldCtpEligibleHoles } from './scoring.js';
 import { ldCtpRoundNote } from './ui/settings.js';
 
@@ -51,4 +51,19 @@ test('legacy winner maps migrate into one combined per-hole winner list', () => 
   assert.deepEqual(state.ldCtpWins.sim['14'], ['a', 'b']);
   assert.equal(res.a.ldctp, 2);
   assert.equal(res.b.ldctp, 1);
+});
+
+test('reset restores LD/CTP eligibility to all holes for both rounds', () => {
+  const state = migrateState({
+    v: 3,
+    rounds: {
+      bana: { ctp: [5, 7] },
+      sim: { ctp: [3], ld: [9] }
+    }
+  });
+
+  resetLdCtpHolesState(state);
+
+  assert.deepEqual(ldCtpEligibleHoles(state.rounds.bana), Array.from({ length: 18 }, (_, i) => i + 1));
+  assert.deepEqual(ldCtpEligibleHoles(state.rounds.sim), Array.from({ length: 18 }, (_, i) => i + 1));
 });
