@@ -151,7 +151,7 @@ export function renderRound(rid) {
       : !bonus.currentSegment.clean
         ? 'Aktuellt block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + ' innehåller redan en trippelbogey eller sämre.'
         : bonus.currentSegment.filled
-          ? bonus.currentSegment.filled + ' av ' + bonus.segmentHoles + ' hål ifyllda i block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.'
+          ? bonus.currentSegment.filled + ' av ' + bonus.currentSegment.size + ' hål ifyllda i block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.'
           : 'Nästa bonus gäller block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.';
     cleanText = 'Ren rond: ' + wins + ' ' + progress;
     if (bonus.earned) cleanColor = ';color:var(--blue)';
