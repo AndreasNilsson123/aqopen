@@ -87,6 +87,27 @@ test('clean bonus can still award the second 9-hole block independently', () => 
   assert.equal(res.p1.tri, 5);
 });
 
+test('clean bonus also applies to simulator blocks', () => {
+  const state = migrateState({
+    players: [{ id: 'p1', name: 'Player 1', handicap: 0 }],
+    gamemode: {
+      bonuses: {
+        clean: { enabled: true, points: 5, rounds: { bana: false, sim: true }, segmentHoles: 9 },
+        ldctp: { enabled: false },
+        comeback: { enabled: false }
+      }
+    },
+    strokes: {
+      bana: { p1: [] },
+      sim: { p1: filled([]) }
+    }
+  });
+  const res = computeFromRaw(state);
+
+  assert.equal(res.p1.cleanSim, 2);
+  assert.equal(res.p1.tri, 10);
+});
+
 test('clean bonus includes the last shorter block when segment size does not divide 18', () => {
   const state = migrateState({
     players: [{ id: 'p1', name: 'Player 1', handicap: 0 }],
