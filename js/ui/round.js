@@ -146,9 +146,13 @@ export function renderRound(rid) {
     const wins = bonus.earned ? bonus.earned + ' bonus' + (bonus.earned === 1 ? '' : 'ar') + ' säkrad' + (bonus.earned === 1 ? '' : 'e') + '.' : 'Ingen bonus säkrad ännu.';
     const progress = st.complete
       ? 'Ronden är färdig.'
-      : bonus.streak
-        ? bonus.streak + ' av ' + bonus.segmentHoles + ' rena hål i följd mot nästa bonus.'
-        : 'Starta en följd på ' + bonus.segmentHoles + ' rena hål för nästa bonus.';
+      : !bonus.currentSegment
+        ? 'Inga fler fulla bonusblock återstår i ronden.'
+      : !bonus.currentSegment.clean
+        ? 'Aktuellt block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + ' innehåller redan en trippelbogey eller sämre.'
+        : bonus.currentSegment.filled
+          ? bonus.currentSegment.filled + ' av ' + bonus.segmentHoles + ' hål ifyllda i block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.'
+          : 'Nästa bonus gäller block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.';
     cleanText = 'Ren rond: ' + wins + ' ' + progress;
     if (bonus.earned) cleanColor = ';color:var(--blue)';
   } else if (st.complete) {

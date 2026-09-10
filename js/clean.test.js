@@ -41,7 +41,7 @@ test('clean bonus can be awarded for each 9-hole segment', () => {
   assert.equal(res.p1.tri, 10);
 });
 
-test('clean bonus uses consecutive clean holes instead of requiring holes 1-9', () => {
+test('clean bonus does not award a 9-hole segment when the fixed block contains a triple', () => {
   const state = migrateState({
     players: [{ id: 'p1', name: 'Player 1', handicap: 0 }],
     gamemode: {
@@ -54,6 +54,29 @@ test('clean bonus uses consecutive clean holes instead of requiring holes 1-9', 
     strokes: {
       bana: {
         p1: [7, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, null, null, null, null, null, null]
+      },
+      sim: { p1: [] }
+    }
+  });
+  const res = computeFromRaw(state);
+
+  assert.equal(res.p1.cleanBana, 0);
+  assert.equal(res.p1.tri, 0);
+});
+
+test('clean bonus can still award the second 9-hole block independently', () => {
+  const state = migrateState({
+    players: [{ id: 'p1', name: 'Player 1', handicap: 0 }],
+    gamemode: {
+      bonuses: {
+        clean: { enabled: true, points: 5, rounds: { bana: true, sim: false }, segmentHoles: 9 },
+        ldctp: { enabled: false },
+        comeback: { enabled: false }
+      }
+    },
+    strokes: {
+      bana: {
+        p1: [7, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
       },
       sim: { p1: [] }
     }

@@ -55,26 +55,41 @@ export function cleanSegmentHoles(mode = gm()) {
 
 export function cleanBonusStats(strokes, pars, segmentHoles = cleanSegmentHoles()) {
   const size = clamp(num(segmentHoles, HOLES), 1, HOLES);
-  let earned = 0, streak = 0, filled = 0, clean = true;
+  const segmentCount = Math.max(1, Math.floor(HOLES / size));
+  let earned = 0, filled = 0, clean = true;
+  let currentSegment = null;
+
   for (let i = 0; i < HOLES; i++) {
+    if (strokes[i] != null) filled++;
+  }
+
+  for (let seg = 0; seg < segmentCount; seg++) {
+    const start = seg * size;
+    let segmentFilled = 0, segmentClean = true;
+    for (let i = start; i < start + size; i++) {
+      const score = strokes[i];
+      if (score == null) continue;
+      segmentFilled++;
+      if (score - pars[i] >= 3) {
+        clean = false;
+        segmentClean = false;
+      }
+    }
+    if (segmentFilled === size) {
+      if (segmentClean) earned++;
+      continue;
+    }
+    currentSegment = { index: seg + 1, start: start + 1, end: start + size, filled: segmentFilled, clean: segmentClean };
+    break;
+  }
+
+  for (let i = segmentCount * size; i < HOLES; i++) {
     const score = strokes[i];
-    if (score == null) {
-      streak = 0;
-      continue;
-    }
-    filled++;
-    if (score - pars[i] >= 3) {
-      clean  = false;
-      streak = 0;
-      continue;
-    }
-    streak++;
-    if (streak === size) {
-      earned++;
-      streak = 0;
+    if (score != null && score - pars[i] >= 3) {
+      clean = false;
     }
   }
-  return { earned, streak, filled, clean, segmentHoles: size };
+  return { earned, filled, clean, segmentHoles: size, segmentCount, currentSegment };
 }
 
 export function tiebreakLabel(value) {
@@ -103,7 +118,7 @@ export function gamemodeLines(mode = gm()) {
   if (ruleEnabled('clean')) {
     const cl     = ruleCfg('clean');
     const rounds = ROUND_IDS.filter(rid => cl.rounds[rid]).map(rid => ROUND_LABELS[rid]).join(', ');
-    lines.push('Ren rond: ' + fmt(cl.points) + ' poäng per ' + cleanSegmentHoles(mode) + ' hål i följd på ' + rounds.toLowerCase() + '.');
+    lines.push('Ren rond: ' + fmt(cl.points) + ' poäng per fast block om ' + cleanSegmentHoles(mode) + ' hål på ' + rounds.toLowerCase() + '.');
   }
   if (ruleEnabled('comeback')) {
     lines.push('Comeback: ' + fmt(ruleCfg('comeback').points) + ' poäng till största förbättringen.');

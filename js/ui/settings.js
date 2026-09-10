@@ -554,7 +554,7 @@ function buildBonusSection(box) {
             save(); rerender();
           };
           card.insertBefore(holesRow, chips);
-          card.insertBefore(el('<p class="empty-note" style="margin:8px 0 0">Bonus delas ut för varje följd av valfritt antal hål utan trippelbogey eller sämre.</p>'), chips);
+          card.insertBefore(el('<p class="empty-note" style="margin:8px 0 0">Bonus delas ut per fast block från hål 1 och framåt, till exempel 1–9 och 10–18.</p>'), chips);
         }
         rounds.forEach(rid => {
           const chip = el('<button class="chip" aria-pressed="' + rule.rounds[rid] + '">' + ROUND_LABELS[rid] + '</button>');
