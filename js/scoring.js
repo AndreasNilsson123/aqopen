@@ -58,6 +58,7 @@ export function cleanBonusStats(strokes, pars, segmentHoles = cleanSegmentHoles(
   const segmentCount = Math.max(1, Math.ceil(HOLES / size));
   let earned = 0, filled = 0, clean = true;
   let currentSegment = null;
+  let lastSegment = null;
 
   for (let i = 0; i < HOLES; i++) {
     if (strokes[i] != null) filled++;
@@ -76,14 +77,15 @@ export function cleanBonusStats(strokes, pars, segmentHoles = cleanSegmentHoles(
         segmentClean = false;
       }
     }
+    lastSegment = { index: seg + 1, start: start + 1, end, size: end - start, filled: segmentFilled, clean: segmentClean };
     if (segmentFilled === end - start) {
       if (segmentClean) earned++;
       continue;
     }
-    currentSegment = { index: seg + 1, start: start + 1, end, size: end - start, filled: segmentFilled, clean: segmentClean };
+    currentSegment = lastSegment;
     break;
   }
-  return { earned, filled, clean, segmentHoles: size, segmentCount, currentSegment };
+  return { earned, filled, clean, segmentHoles: size, segmentCount, currentSegment, lastSegment };
 }
 
 export function tiebreakLabel(value) {

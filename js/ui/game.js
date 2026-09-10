@@ -141,8 +141,9 @@ export function renderGame() {
   /* Stakes summary */
   const stakes    = el('<div class="subcard"><h4>Vad står på spel?</h4><p>' + esc(stablefordSummary()) + '</p><div class="chips" id="stakes"></div></div>');
   const stakeRow  = stakes.querySelector('#stakes');
+  const cleanCfg  = gm().bonuses.clean;
   if (hasPrize) stakeRow.appendChild(el('<span class="tag">LD / CTP på hålet +' + fmt(ldCtpPoints()) + ' p</span>'));
-  if (ruleEnabled('clean', rid)) stakeRow.appendChild(el('<span class="tag">Ren rond / ' + cleanSegmentHoles() + ' hål +' + fmt(ruleCfg('clean').points) + ' p</span>'));
+  if (cleanCfg?.enabled && (!cleanCfg.rounds || cleanCfg.rounds[rid])) stakeRow.appendChild(el('<span class="tag">Ren rond / ' + cleanSegmentHoles(gm()) + ' hål +' + fmt(cleanCfg.points) + ' p</span>'));
   const hcfg = gm().handicap;
   if (hcfg.mode !== 'none' && (hcfg.appliesTo === 'event' || hcfg.appliesTo === 'both' || hcfg.appliesTo === rid)) {
     stakeRow.appendChild(el('<span class="tag">Handicap ' + esc(handicapModeLabel(hcfg.mode)) + '</span>'));

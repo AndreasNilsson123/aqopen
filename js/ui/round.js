@@ -145,7 +145,9 @@ export function renderRound(rid) {
     const bonus = st.cleanBonus;
     const wins = bonus.earned ? bonus.earned + ' bonus' + (bonus.earned === 1 ? '' : 'ar') + ' säkrad' + (bonus.earned === 1 ? '' : 'e') + '.' : 'Ingen bonus säkrad ännu.';
     const progress = st.complete
-      ? 'Ronden är färdig.'
+      ? (!bonus.lastSegment?.clean
+          ? 'Sista blocket ' + bonus.lastSegment.start + '–' + bonus.lastSegment.end + ' gav ingen bonus.'
+          : 'Alla bonusblock är färdigspelade.')
       : !bonus.currentSegment
         ? 'Inga fler fulla bonusblock återstår i ronden.'
       : !bonus.currentSegment.clean
