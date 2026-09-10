@@ -159,6 +159,7 @@ export function normalizeGamemode(raw) {
     const current = bonuses[key] || {};
     gm.bonuses[key].enabled = current.enabled == null ? gm.bonuses[key].enabled : !!current.enabled;
     gm.bonuses[key].points  = clamp(num(current.points, gm.bonuses[key].points), -50, 50);
+    gm.bonuses[key].segmentHoles = clamp(num(current.segmentHoles, gm.bonuses[key].segmentHoles || HOLES), 1, HOLES);
     const rounds            = current.rounds || {};
     gm.bonuses[key].rounds  = {
       bana: rounds.bana == null ? gm.bonuses[key].rounds.bana : !!rounds.bana,

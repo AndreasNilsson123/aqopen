@@ -49,6 +49,34 @@ export function ldCtpEligibleHoles(round) {
   return Array.from({ length: HOLES }, (_, i) => i + 1);
 }
 
+export function cleanSegmentHoles(mode = gm()) {
+  return clamp(num(mode?.bonuses?.clean?.segmentHoles, HOLES), 1, HOLES);
+}
+
+export function cleanBonusStats(strokes, pars, segmentHoles = cleanSegmentHoles()) {
+  const size = clamp(num(segmentHoles, HOLES), 1, HOLES);
+  let earned = 0, streak = 0, filled = 0, clean = true;
+  for (let i = 0; i < HOLES; i++) {
+    const score = strokes[i];
+    if (score == null) {
+      streak = 0;
+      continue;
+    }
+    filled++;
+    if (score - pars[i] >= 3) {
+      clean  = false;
+      streak = 0;
+      continue;
+    }
+    streak++;
+    if (streak === size) {
+      earned++;
+      streak = 0;
+    }
+  }
+  return { earned, streak, filled, clean, segmentHoles: size };
+}
+
 export function tiebreakLabel(value) {
   return TIEBREAK_OPTIONS.find(o => o.value === value)?.label || 'Ingen';
 }
@@ -75,7 +103,7 @@ export function gamemodeLines(mode = gm()) {
   if (ruleEnabled('clean')) {
     const cl     = ruleCfg('clean');
     const rounds = ROUND_IDS.filter(rid => cl.rounds[rid]).map(rid => ROUND_LABELS[rid]).join(', ');
-    lines.push('Ren rond: ' + fmt(cl.points) + ' poäng på ' + rounds.toLowerCase() + '.');
+    lines.push('Ren rond: ' + fmt(cl.points) + ' poäng per ' + cleanSegmentHoles(mode) + ' hål i följd på ' + rounds.toLowerCase() + '.');
   }
   if (ruleEnabled('comeback')) {
     lines.push('Comeback: ' + fmt(ruleCfg('comeback').points) + ' poäng till största förbättringen.');
@@ -134,14 +162,14 @@ export function arr(roundId, pid) {
 
 export function roundStable(roundId, pid) {
   const a = arr(roundId, pid), pars = store.S.rounds[roundId].pars;
-  let sum = 0, filled = 0, clean = true;
+  let sum = 0, filled = 0;
   for (let i = 0; i < HOLES; i++) {
     if (a[i] == null) continue;
     filled++;
     sum += holePoints(a[i], pars[i]);
-    if (a[i] - pars[i] >= 3) clean = false;
   }
-  return { sum, filled, complete: filled === HOLES, clean };
+  const cleanBonus = cleanBonusStats(a, pars);
+  return { sum, filled, complete: filled === HOLES, clean: cleanBonus.clean, cleanBonus };
 }
 
 export function splitPoints(winners, total) {
@@ -311,14 +339,14 @@ export function computeFromRaw(state) {
   function _roundStable(rid, pid) {
     const a    = _arr(rid, pid);
     const pars = state.rounds[rid].pars;
-    let sum = 0, filled = 0, clean = true;
+    let sum = 0, filled = 0;
     for (let i = 0; i < HOLES; i++) {
       if (a[i] == null) continue;
       filled++;
       sum += _holePoints(a[i], pars[i]) ?? 0;
-      if (a[i] - pars[i] >= 3) clean = false;
     }
-    return { sum, filled, complete: filled === HOLES, clean };
+    const cleanBonus = cleanBonusStats(a, pars, cleanSegmentHoles(mode));
+    return { sum, filled, complete: filled === HOLES, clean: cleanBonus.clean, cleanBonus };
   }
 
   function _ruleEnabled(key, rid) {
@@ -363,14 +391,14 @@ export function computeFromRaw(state) {
       stableSim:  stats.sim[p.id].sum,
       ldctp: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
-      cleanBana: false, cleanSim: false, delta: null, badges: [], tb: 0
+      cleanBana: 0, cleanSim: 0, delta: null, badges: [], tb: 0
     };
   });
 
   state.players.forEach(p => {
     const b = stats.bana[p.id], s = stats.sim[p.id], r = res[p.id];
-    if (_ruleEnabled('clean', 'bana') && b.complete && b.clean) { r.tri += mode.bonuses.clean.points; r.cleanBana = true; }
-    if (_ruleEnabled('clean', 'sim')  && s.complete && s.clean) { r.tri += mode.bonuses.clean.points; r.cleanSim  = true; }
+    if (_ruleEnabled('clean', 'bana') && b.cleanBonus.earned) { r.cleanBana = b.cleanBonus.earned; r.tri += r.cleanBana * mode.bonuses.clean.points; }
+    if (_ruleEnabled('clean', 'sim')  && s.cleanBonus.earned) { r.cleanSim  = s.cleanBonus.earned; r.tri += r.cleanSim  * mode.bonuses.clean.points; }
     if (b.complete && s.complete) r.delta = s.sum - b.sum;
     r.hcpBana  = _handicapRoundBonus(p, 'bana', b);
     r.hcpSim   = _handicapRoundBonus(p, 'sim',  s);
@@ -421,15 +449,15 @@ export function compute() {
       stableSim:  stats.sim[p.id].sum,
       ldctp: 0, tri: 0, cb: 0,
       hcpBana: 0, hcpSim: 0, hcpEvent: 0, hcp: 0, total: 0,
-      cleanBana: false, cleanSim: false, delta: null, badges: [],
+      cleanBana: 0, cleanSim: 0, delta: null, badges: [],
       tb: 0
     };
   });
 
   store.S.players.forEach(p => {
     const b = stats.bana[p.id], s = stats.sim[p.id], r = res[p.id];
-    if (ruleEnabled('clean', 'bana') && b.complete && b.clean) { r.tri += ruleCfg('clean').points; r.cleanBana = true; }
-    if (ruleEnabled('clean', 'sim')  && s.complete && s.clean) { r.tri += ruleCfg('clean').points; r.cleanSim  = true; }
+    if (ruleEnabled('clean', 'bana') && b.cleanBonus.earned) { r.cleanBana = b.cleanBonus.earned; r.tri += r.cleanBana * ruleCfg('clean').points; }
+    if (ruleEnabled('clean', 'sim')  && s.cleanBonus.earned) { r.cleanSim  = s.cleanBonus.earned; r.tri += r.cleanSim  * ruleCfg('clean').points; }
     if (b.complete && s.complete) r.delta = s.sum - b.sum;
     r.hcpBana  = handicapRoundBonus(p, 'bana', b);
     r.hcpSim   = handicapRoundBonus(p, 'sim',  s);
@@ -485,7 +513,8 @@ export function compute() {
   const comebackLead = Math.max(0, ...store.S.players.map(p => res[p.id].cb));
   store.S.players.forEach(p => {
     const r = res[p.id];
-    if (r.cleanBana || r.cleanSim) r.badges.push('Ren rond');
+    const cleanCount = (r.cleanBana || 0) + (r.cleanSim || 0);
+    if (cleanCount) r.badges.push('Ren rond' + (cleanCount > 1 ? ' ×' + cleanCount : ''));
     if (r.hcp) r.badges.push('HCP ' + (r.hcp > 0 ? '+' : '') + fmt(r.hcp));
     if (comebackLead > 0 && r.cb === comebackLead) r.badges.push('Comeback-ledare');
   });
