@@ -13,7 +13,7 @@ import {
 } from '../store.js';
 import {
   gm, ruleEnabled, ruleCfg, gamemodeLines, stablefordSummary,
-  handicapModeLabel, handicapAppliesLabel, tiebreakLabel, ldCtpEligibleHoles
+  handicapModeLabel, handicapAppliesLabel, tiebreakLabel, ldCtpEligibleHoles, cleanSegmentHoles
 } from '../scoring.js';
 import { save, setStatus, syncedNote } from '../sync.js';
 
@@ -544,6 +544,18 @@ function buildBonusSection(box) {
         setFocusKey(pointsInput, 'bonus:' + key + ':points');
         pointsInput.onchange = e => { touchGamemode(); rule.points = clamp(num(e.target.value, 0), -50, 50); save(); rerender(); };
         card.insertBefore(pointsRow, chips);
+        if (key === 'clean') {
+          const holesRow = el('<div class="field" style="margin-top:8px"><label>Hål i följd per bonus</label><input type="number" min="1" max="' + HOLES + '" value="' + cleanSegmentHoles() + '"></div>');
+          const holesInput = holesRow.querySelector('input');
+          setFocusKey(holesInput, 'bonus:' + key + ':segmentHoles');
+          holesInput.onchange = e => {
+            touchGamemode();
+            rule.segmentHoles = clamp(num(e.target.value, HOLES), 1, HOLES);
+            save(); rerender();
+          };
+          card.insertBefore(holesRow, chips);
+          card.insertBefore(el('<p class="empty-note" style="margin:8px 0 0">Bonus delas ut per fast block från hål 1 och framåt, till exempel 1–9 och 10–18. Om 18 inte går jämnt upp blir sista blocket kortare.</p>'), chips);
+        }
         rounds.forEach(rid => {
           const chip = el('<button class="chip" aria-pressed="' + rule.rounds[rid] + '">' + ROUND_LABELS[rid] + '</button>');
           setFocusKey(chip, 'bonus:' + key + ':round:' + rid);

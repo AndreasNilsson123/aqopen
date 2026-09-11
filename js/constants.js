@@ -19,7 +19,7 @@ export const PRESET_LIBRARY = {
     stableford: { eaglePlus: 12, birdie: 6, par: 3, bogey: 2, double: 1, triple: 0 },
     bonuses: {
       ldctp:    { enabled: true,  points: 1,  rounds: { bana: true,  sim: true  } },
-      clean:    { enabled: true,  points: 5,  rounds: { bana: true,  sim: true  } },
+      clean:    { enabled: true,  points: 5,  rounds: { bana: true,  sim: true  }, segmentHoles: 18 },
       comeback: { enabled: true,  points: 10 }
     },
     handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' },
@@ -31,7 +31,7 @@ export const PRESET_LIBRARY = {
     stableford: { eaglePlus: 5, birdie: 4, par: 3, bogey: 2, double: 1, triple: 0 },
     bonuses: {
       ldctp:    { enabled: false, points: 1, rounds: { bana: true,  sim: true  } },
-      clean:    { enabled: false, points: 3, rounds: { bana: true,  sim: true  } },
+      clean:    { enabled: false, points: 3, rounds: { bana: true,  sim: true  }, segmentHoles: 18 },
       comeback: { enabled: false, points: 5 }
     },
     handicap: { mode: 'none', allowance: 100, pointValue: 1, appliesTo: 'event' },

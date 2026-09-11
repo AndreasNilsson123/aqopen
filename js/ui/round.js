@@ -139,14 +139,28 @@ export function renderRound(rid) {
     '</tr>'
   ));
 
-  const cleanText = ruleEnabled('clean', rid)
-    ? (st.clean
-        ? 'Ronden klar utan trippelbogey: +' + fmt(ruleCfg('clean').points) + ' poäng.'
-        : 'Ronden klar. Trippelbogey eller sämre noterad, ingen bonus.')
-    : 'Ronden klar.';
-  const cleanNote = st.complete
-    ? '<p class="empty-note" style="margin:10px 0 0' + (st.clean && ruleEnabled('clean', rid) ? ';color:var(--blue)' : '') + '">' + cleanText + '</p>'
-    : '<p class="empty-note" style="margin:10px 0 0">' + st.filled + ' av 18 hål ifyllda.</p>';
+  let cleanText = st.filled + ' av 18 hål ifyllda.';
+  let cleanColor = '';
+  if (ruleEnabled('clean', rid)) {
+    const bonus = st.cleanBonus;
+    const wins = bonus.earned ? bonus.earned + ' bonus' + (bonus.earned === 1 ? '' : 'ar') + ' säkrad' + (bonus.earned === 1 ? '' : 'e') + '.' : 'Ingen bonus säkrad ännu.';
+    const progress = st.complete
+      ? (bonus.earned
+          ? 'Ronden är färdig med totalt ' + bonus.earned + ' Ren rond-bonus' + (bonus.earned === 1 ? '' : 'ar') + '.'
+          : 'Ronden är färdig utan Ren rond-bonus.')
+      : !bonus.currentSegment
+        ? 'Inga fler fulla bonusblock återstår i ronden.'
+      : !bonus.currentSegment.clean
+        ? 'Aktuellt block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + ' innehåller redan en trippelbogey eller sämre.'
+        : bonus.currentSegment.filled
+          ? bonus.currentSegment.filled + ' av ' + bonus.currentSegment.size + ' hål ifyllda i block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.'
+          : 'Nästa bonus gäller block ' + bonus.currentSegment.start + '–' + bonus.currentSegment.end + '.';
+    cleanText = 'Ren rond: ' + wins + ' ' + progress;
+    if (bonus.earned) cleanColor = ';color:var(--blue)';
+  } else if (st.complete) {
+    cleanText = 'Ronden klar.';
+  }
+  const cleanNote = '<p class="empty-note" style="margin:10px 0 0' + cleanColor + '">' + cleanText + '</p>';
   sc.querySelector('.card-body').appendChild(el(cleanNote));
   if (hcpRound) sc.querySelector('.card-body').appendChild(el('<p class="empty-note" style="margin:8px 0 0">Handicap i den här ronden: ' + fmt(hcpRound) + ' p.</p>'));
   box.appendChild(sc);
